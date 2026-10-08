@@ -23,6 +23,8 @@
 }
 
 * { box-sizing: border-box; }
+/* ต้องมี: .sheet / .toast ตั้ง display เอง ซึ่งชนะ [hidden] ของเบราว์เซอร์ ทำให้แผ่นเทาบังทั้งหน้า */
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--text);
