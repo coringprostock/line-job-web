@@ -8,6 +8,20 @@
   const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   // ขั้นหลักของงาน (แถบสถานะแบบ Grab) · ยกเลิก แยกเป็นปุ่ม
   const FLOW = ['รับแจ้ง', 'ติดต่อลูกค้า', 'ตรวจเช็ค', 'รอใบเสนอราคา', 'รอลูกค้าคอนเฟิร์ม', 'ซ่อม', 'รออะไหล่', 'เสร็จ รอลูกค้ารับ', 'ปิด'];
+  // ช่วงงาน → สีแถบ (บอร์ด / ภาพรวม / สถิติ)
+  const PHASE = {
+    'รับแจ้ง': 'start', 'ติดต่อลูกค้า': 'start',
+    'ตรวจเช็ค': 'assess', 'รอใบเสนอราคา': 'assess', 'รอลูกค้าคอนเฟิร์ม': 'assess',
+    'ซ่อม': 'repair', 'รออะไหล่': 'repair',
+    'เสร็จ รอลูกค้ารับ': 'done',
+    'ปิด': 'closed', 'ยกเลิก': 'closed', 'รวมกับงานอื่น': 'closed'
+  };
+  const PHASE_NAME = { start: 'เริ่มงาน', assess: 'ตรวจ / เสนอราคา', repair: 'ซ่อม', done: 'เสร็จ รอลูกค้ารับ', closed: 'ปิดแล้ว' };
+  const ph = status => 'ph-' + (PHASE[status] || 'closed');
+  const pref = (k, v) => { // จำตัวเลือกของคนดู (ถ้าเบราว์เซอร์ไม่ให้เก็บก็ไม่เป็นไร)
+    try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { /* ไม่ต้องทำอะไร */ }
+    return null;
+  };
   const SHORT = { 'รอลูกค้าคอนเฟิร์ม': 'รอคอนเฟิร์ม', 'เสร็จ รอลูกค้ารับ': 'เสร็จ รอรับ', 'รอใบเสนอราคา': 'รอใบเสนอราคา' };
   const ERRORS = {
     not_staff: 'บัญชี LINE นี้ยังไม่อยู่ในชีต Staff — ให้พิมพ์ข้อความในกลุ่มงานสักครั้ง แล้วให้ผู้ดูแลใส่ชื่อในชีต Staff',
@@ -127,6 +141,8 @@
   }
 
   function drawBoard() {
+    state.boardView = state.boardView || pref('boardView') || 'list';
+    if (state.boardView === 'dash') return drawDashboard();
     const b = state.board;
     const q = state.query.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, '');
@@ -140,21 +156,28 @@
     if (q) {
       jobs = jobs.filter(j => (j.no + ' ' + j.title + ' ' + j.customer + ' ' + j.owner).toLowerCase().includes(q) ||
         (qDigits.length >= 4 && j.phone.replace(/\D/g, '').includes(qDigits)));
+    } else if (state.filter.indexOf('status:') === 0) {
+      jobs = jobs.filter(j => j.status === state.filter.slice(7));
+    } else if (state.filter.indexOf('product:') === 0) {
+      jobs = jobs.filter(j => !j.closed && j.product === state.filter.slice(8));
     } else {
       jobs = jobs.filter(j => state.filter === 'open' ? !j.closed : state.filter === 'due' ? j.due
         : state.filter === 'quiet' ? !j.closed && !j.due && j.quietDays >= b.silentDays : j.closed);
     }
     const chip = (key, label) => '<button class="chip' + (state.filter === key && !q ? ' on' : '') + '" data-filter="' + key + '">' +
       label + ' ' + counts[key] + '</button>';
-    let html = '<div class="toolbar"><input class="search" id="q" type="search" placeholder="ค้นหา เลขงาน ชื่อ ลูกค้า เบอร์" value="' +
+    let html = viewToggle() + '<div class="toolbar"><input class="search" id="q" type="search" placeholder="ค้นหา เลขงาน ชื่อ ลูกค้า เบอร์" value="' +
       esc(state.query) + '"><div class="chips">' + chip('open', 'เปิดอยู่') + chip('due', '⏰ ถึงวันตาม') +
-      chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') + '</div></div>';
+      chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') +
+      (state.filter.indexOf(':') > 0 ? '<button class="chip on" data-filter="open">' + esc(state.filter.split(':')[1]) + ' ✕</button>' : '') +
+      '</div></div>';
 
     if (!jobs.length) html += '<div class="center muted">ไม่มีงาน</div>';
     const groups = q || state.filter === 'closed' ? [['', jobs]]
       : b.statuses.map(s => [s, jobs.filter(j => j.status === s)]).filter(g => g[1].length);
     groups.forEach(([title, list]) => {
-      html += '<section class="group">' + (title ? '<h3>' + esc(title) + ' (' + list.length + ')</h3>' : '');
+      html += '<section class="group">' + (title ? '<div class="band ' + ph(title) + '">' + esc(title) +
+        '<span class="n">' + list.length + ' งาน</span></div>' : '');
       list.forEach(j => { html += jobCardHtml(j, b.silentDays); });
       html += '</section>';
     });
@@ -173,17 +196,96 @@
       state.query = '';
       drawBoard();
     });
+    bindViewToggle();
+  }
+
+  function viewToggle() {
+    const seg = (v, label) => '<button class="seg' + (state.boardView === v ? ' on' : '') + '" data-view="' + v + '">' + label + '</button>';
+    return '<div class="view-toggle"><div class="segs">' + seg('list', 'รายการ') + seg('dash', 'ภาพรวม') + '</div></div><div style="height:10px"></div>';
+  }
+  function bindViewToggle() {
+    $app.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+      state.boardView = b.dataset.view;
+      pref('boardView', state.boardView);
+      drawBoard();
+    });
+  }
+
+  // ภาพรวมงาน: ตัวเลขสำคัญ + งานเปิดแยกช่วง/สถานะ/เจ้าของ/สินค้า · กดแล้วไปรายการที่กรองแล้ว
+  function drawDashboard() {
+    const b = state.board;
+    const jobs = b.jobs.filter(j => !j.merged);
+    const open = jobs.filter(j => !j.closed);
+    const today = todayKey();
+    const weekAgo = todayKey(-6);
+    const k = iso => { if (!iso) return ''; const d = new Date(iso); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    const due = jobs.filter(j => j.due).length;
+    const quiet = open.filter(j => !j.due && j.quietDays >= b.silentDays).length;
+    const newToday = jobs.filter(j => k(j.opened) === today).length;
+    const newWeek = jobs.filter(j => k(j.opened) >= weekAgo).length;
+    const closedWeek = jobs.filter(j => j.status === 'ปิด' && k(j.closedAt) >= weekAgo).length;
+    const tile = (num, lbl, filter, cls) => '<button class="tile' + (cls ? ' ' + cls : '') + '"' + (filter ? ' data-go="' + filter + '"' : '') +
+      '><div class="num">' + num + '</div><div class="lbl">' + lbl + '</div></button>';
+    let html = viewToggle() + '<div class="tiles">' +
+      tile(open.length, 'งานเปิดอยู่', 'open') + tile(due, '⏰ ถึงวันตาม / เลยกำหนด', 'due', due ? 'warn' : '') +
+      tile(quiet, '😶 เงียบเกิน ' + b.silentDays + ' วันทำการ', 'quiet', quiet ? 'bad' : '') +
+      tile(newToday, 'งานเข้าวันนี้') + tile(newWeek, 'งานเข้า 7 วัน') + tile(closedWeek, 'ปิดงาน 7 วัน', 'closed') + '</div>';
+
+    // งานเปิดแยกตามช่วงงาน (แถบซ้อน) + ทีละสถานะ
+    html += '<div class="panel-box"><h3>งานเปิดอยู่ แยกตามขั้นตอน</h3><div class="stack">';
+    ['start', 'assess', 'repair', 'done'].forEach(p => {
+      const n = open.filter(j => PHASE[j.status] === p).length;
+      if (n) html += '<span class="ph-' + p + '" style="flex:' + n + '" title="' + PHASE_NAME[p] + ' ' + n + '"></span>';
+    });
+    html += '</div>';
+    const maxS = Math.max(1, ...b.statuses.map(s => open.filter(j => j.status === s).length));
+    b.statuses.filter(s => PHASE[s] !== 'closed').forEach(s => {
+      const n = open.filter(j => j.status === s).length;
+      html += '<button class="hrow ' + ph(s) + '" data-go="status:' + esc(s) + '"><span class="lbl">' + esc(s) + '</span><span class="track"><span class="fill" style="width:' +
+        (n / maxS * 100) + '%"></span></span><span class="val">' + n + ' งาน</span></button>';
+    });
+    html += '</div>';
+
+    html += hbarsBox('งานเปิดอยู่ แยกตามสินค้า', open, j => j.product, 'product:');
+    html += hbarsBox('งานเปิดอยู่ แยกตามเจ้าของงาน', open, j => j.owner || '-', '');
+    $app.innerHTML = html;
+    $app.querySelectorAll('[data-go]').forEach(t => t.onclick = () => {
+      state.filter = t.dataset.go;
+      state.query = '';
+      state.boardView = 'list';
+      pref('boardView', 'list');
+      drawBoard();
+      window.scrollTo(0, 0);
+    });
+    bindViewToggle();
+  }
+
+  // แถบแนวนอน (สีเดียว) + จำนวน + สัดส่วน
+  function hbarsBox(title, list, keyFn, goPrefix) {
+    const counts = {};
+    list.forEach(j => { const k = keyFn(j); counts[k] = (counts[k] || 0) + 1; });
+    const rows = Object.keys(counts).sort((a, b) => (a === 'ไม่ระบุ') - (b === 'ไม่ระบุ') || counts[b] - counts[a]);
+    if (!rows.length) return '';
+    const max = Math.max(...rows.map(r => counts[r]));
+    let html = '<div class="panel-box"><h3>' + esc(title) + '</h3>';
+    rows.forEach(r => {
+      const pct = Math.round(counts[r] / list.length * 100);
+      html += '<' + (goPrefix ? 'button' : 'div') + ' class="hrow"' + (goPrefix ? ' data-go="' + goPrefix + esc(r) + '"' : '') +
+        '><span class="lbl">' + esc(r) + '</span><span class="track"><span class="fill" style="width:' + (counts[r] / max * 100) +
+        '%"></span></span><span class="val">' + counts[r] + ' · ' + pct + '%</span></' + (goPrefix ? 'button' : 'div') + '>';
+    });
+    return html + '</div>';
   }
 
   function jobCardHtml(j, silentDays) {
     const meta = [];
-    meta.push('<span class="pill' + (j.closed ? ' closed' : '') + '">' + esc(shortStatus(j.status)) + '</span>');
+    meta.push('<span class="pill ' + ph(j.status) + (j.closed ? ' closed' : '') + '">' + esc(shortStatus(j.status)) + '</span>');
     if (j.customer) meta.push(esc(j.customer));
     if (j.due) meta.push('<span class="flag-due">⏰ ตาม ' + esc(fmtKey(j.follow)) + '</span>');
     else if (j.follow && !j.closed) meta.push('ตาม ' + esc(fmtKey(j.follow)));
     if (!j.closed && j.quietDays >= silentDays) meta.push('<span class="flag-quiet">😶 เงียบ ' + j.quietDays + ' วัน</span>');
     meta.push('ล่าสุด ' + esc(fmtDate(j.last)));
-    return '<a class="card" href="#job/' + noDigits(j.no) + '"><div class="top"><span class="no">' + esc(j.no) +
+    return '<a class="card ' + ph(j.status) + '" href="#job/' + noDigits(j.no) + '"><div class="top"><span class="no">' + esc(j.no) +
       '</span><span class="title">' + esc(j.title) + '</span></div><div class="meta">' + meta.join('') + '</div></a>';
   }
 
@@ -641,6 +743,154 @@
     }
   }
 
+  // ---------- สถิติ ----------
+  const WEEKDAYS = ['จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.', 'อา.'];
+  const RANGES = [['7', '7 วัน'], ['30', '30 วัน'], ['month', 'เดือนนี้'], ['lastmonth', 'เดือนก่อน'], ['90', '90 วัน'], ['custom', 'เลือกเอง']];
+
+  function rangeOf(key) {
+    const d = new Date();
+    const fmt = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+    if (key === 'month') return [fmt(new Date(d.getFullYear(), d.getMonth(), 1)), todayKey()];
+    if (key === 'lastmonth') return [fmt(new Date(d.getFullYear(), d.getMonth() - 1, 1)), fmt(new Date(d.getFullYear(), d.getMonth(), 0))];
+    if (key === 'custom') return [state.statsFrom || todayKey(-29), state.statsTo || todayKey()];
+    return [todayKey(-(Number(key) - 1)), todayKey()];
+  }
+
+  async function renderStats() {
+    setTab('stats');
+    state.statsRange = state.statsRange || pref('statsRange') || '30';
+    const [from, to] = rangeOf(state.statsRange);
+    $app.innerHTML = statsHeader(from, to) + '<div class="center muted">กำลังคำนวณสถิติ…</div>';
+    bindStatsHeader();
+    const st = await api('stats', { from, to });
+    drawStats(st);
+  }
+
+  function statsHeader(from, to) {
+    let html = '<div class="range">' + RANGES.map(([k, l]) => '<button class="chip' + (state.statsRange === k ? ' on' : '') +
+      '" data-range="' + k + '">' + l + '</button>').join('') + '</div>';
+    if (state.statsRange === 'custom') {
+      html += '<div class="range-custom"><input type="date" id="st-from" max="' + todayKey() + '" value="' + esc(from) +
+        '"><span>ถึง</span><input type="date" id="st-to" max="' + todayKey() + '" value="' + esc(to) + '"></div>';
+    }
+    return html;
+  }
+
+  function bindStatsHeader() {
+    $app.querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
+      state.statsRange = b.dataset.range;
+      pref('statsRange', state.statsRange);
+      renderStats().catch(showError);
+    });
+    const f = document.getElementById('st-from'), t = document.getElementById('st-to');
+    if (f) [f, t].forEach(inp => inp.onchange = () => {
+      state.statsFrom = f.value; state.statsTo = t.value;
+      if (f.value && t.value && f.value <= t.value) renderStats().catch(showError);
+    });
+  }
+
+  function drawStats(st) {
+    const tot = st.totals;
+    const tile = (num, lbl) => '<div class="tile"><div class="num">' + num + '</div><div class="lbl">' + lbl + '</div></div>';
+    let html = statsHeader(st.from, st.to) + '<p class="muted small">' + esc(fmtKey(st.from)) + ' – ' + esc(fmtKey(st.to)) + '</p>' +
+      '<div class="tiles">' + tile(tot.opened, 'งานเข้า') + tile(tot.closed, 'ปิดงาน') + tile(tot.cancelled, 'ยกเลิก') +
+      tile(tot.avgCloseDays === null ? '-' : tot.avgCloseDays, 'วันเฉลี่ยจนปิดงาน') + tile(tot.openNow, 'เปิดอยู่ตอนนี้') + '</div>';
+
+    // รายวัน (ช่วงยาวรวมเป็นรายสัปดาห์ แท่งจะได้ไม่บางเกินไป)
+    let daily = st.daily.map(d => ({ label: fmtKey(d.day), values: [d.opened, d.closed] }));
+    let dailyTitle = 'งานเข้า / ปิดงาน รายวัน';
+    if (daily.length > 45) {
+      const weeks = [];
+      st.daily.forEach((d, i) => {
+        if (i % 7 === 0) weeks.push({ label: fmtKey(d.day), values: [0, 0] });
+        const w = weeks[weeks.length - 1];
+        w.values[0] += d.opened; w.values[1] += d.closed;
+      });
+      daily = weeks;
+      dailyTitle = 'งานเข้า / ปิดงาน รายสัปดาห์ (เริ่มวันที่)';
+    }
+    html += chartBox(dailyTitle, daily, ['งานเข้า', 'ปิดงาน']);
+    html += chartBox('งานเข้า แยกตามวันในสัปดาห์', st.weekday.map((n, i) => ({ label: WEEKDAYS[i], values: [n] })), ['งานเข้า']);
+    html += chartBox('งานเข้า / ปิดงาน รายเดือน', st.monthly.map(m => {
+      const p = m.month.split('-').map(Number);
+      return { label: MONTHS[p[1] - 1] + ' ' + String((p[0] + 543) % 100).padStart(2, '0'), values: [m.opened, m.closed] };
+    }), ['งานเข้า', 'ปิดงาน']);
+
+    // สินค้า: แถบแนวนอนสีเดียว + สัดส่วน (ไม่ใช้กราฟวงกลม)
+    const total = st.products.reduce((a, p) => a + p.count, 0);
+    if (total) {
+      const max = Math.max(...st.products.map(p => p.count));
+      html += '<div class="panel-box"><h3>งานเข้า แยกตามสินค้า</h3>';
+      st.products.forEach(p => {
+        html += '<div class="hrow"><span class="lbl">' + esc(p.name) + '</span><span class="track"><span class="fill" style="width:' +
+          (p.count / max * 100) + '%"></span></span><span class="val">' + p.count + ' · ' + Math.round(p.count / total * 100) + '%</span></div>';
+      });
+      html += '<p class="muted small">หมวดสินค้าเดาจากคำในชื่องาน แก้คำค้นได้ที่ชีต Products · ชื่องานชัดขึ้น = แยกหมวดได้แม่นขึ้น</p></div>';
+    }
+    // งานที่เปิดอยู่ตามสถานะ (สีช่วงงาน)
+    const maxS = Math.max(1, ...Object.values(st.byStatus));
+    html += '<div class="panel-box"><h3>งานเปิดอยู่ตอนนี้ แยกตามสถานะ</h3>';
+    st.statuses.filter(s => st.byStatus[s]).forEach(s => {
+      html += '<div class="hrow ' + ph(s) + '"><span class="lbl">' + esc(s) + '</span><span class="track"><span class="fill" style="width:' +
+        (st.byStatus[s] / maxS * 100) + '%"></span></span><span class="val">' + st.byStatus[s] + ' งาน</span></div>';
+    });
+    html += '</div>';
+    $app.innerHTML = html;
+    bindStatsHeader();
+    bindCharts();
+  }
+
+  // กราฟแท่ง SVG: 1–2 ชุดข้อมูล แกนเดียว · แตะ/ชี้แท่งเพื่อดูตัวเลข · มีตารางให้ดูแทนกราฟ
+  function chartBox(title, rows, names) {
+    const W = 340, H = 170, L = 26, B = 22, T = 8;
+    const max = Math.max(1, ...rows.flatMap(r => r.values));
+    const step = Math.max(1, Math.ceil(max / 4));
+    const top = step * Math.ceil(max / step);
+    const plotW = W - L - 4, plotH = H - B - T;
+    const slot = plotW / Math.max(1, rows.length);
+    const n = names.length, gap = 2;
+    const barW = Math.max(2, Math.min(18, (slot - 4 - gap * (n - 1)) / n));
+    const y = v => T + plotH - v / top * plotH;
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(title) + '">';
+    for (let v = 0; v <= top; v += step) {
+      svg += '<line class="' + (v ? 'gridline' : 'baseline') + '" x1="' + L + '" x2="' + (W - 4) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>' +
+        '<text class="axis" x="' + (L - 4) + '" y="' + (y(v) + 3) + '" text-anchor="end">' + v + '</text>';
+    }
+    const every = Math.ceil(rows.length / 8);
+    rows.forEach((r, i) => {
+      const x0 = L + i * slot + (slot - (barW * n + gap * (n - 1))) / 2;
+      const tip = r.label + ': ' + names.map((nm, k) => nm + ' ' + r.values[k]).join(' · ');
+      svg += '<rect class="hit" data-tip="' + esc(tip) + '" x="' + (L + i * slot) + '" y="' + T + '" width="' + slot + '" height="' + plotH + '"/>';
+      r.values.forEach((v, k) => {
+        if (!v) return;
+        const x = x0 + k * (barW + gap), yy = y(v), h = T + plotH - yy, rr = Math.min(4, barW / 2, h);
+        svg += '<path class="bar s' + (k + 1) + '" d="M' + x + ',' + (T + plotH) + 'V' + (yy + rr) + 'Q' + x + ',' + yy + ' ' + (x + rr) + ',' + yy +
+          'H' + (x + barW - rr) + 'Q' + (x + barW) + ',' + yy + ' ' + (x + barW) + ',' + (yy + rr) + 'V' + (T + plotH) + 'Z"/>';
+      });
+      if (i % every === 0) svg += '<text class="axis" x="' + (L + i * slot + slot / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(r.label) + '</text>';
+    });
+    svg += '</svg>';
+    const legend = n > 1 ? '<div class="legend">' + names.map((nm, k) => '<span><i style="background:var(--s' + (k + 1) + ')"></i>' + esc(nm) + '</span>').join('') + '</div>' : '';
+    const table = '<details class="table"><summary>ดูเป็นตาราง</summary><table><tr><th></th>' + names.map(nm => '<th>' + esc(nm) + '</th>').join('') +
+      '</tr>' + rows.map(r => '<tr><td>' + esc(r.label) + '</td>' + r.values.map(v => '<td>' + v + '</td>').join('') + '</tr>').join('') + '</table></details>';
+    return '<div class="panel-box"><h3>' + esc(title) + '</h3>' + legend + '<div class="chart">' + svg + '</div>' +
+      '<div class="tip muted">แตะแท่งเพื่อดูตัวเลข</div>' + table + '</div>';
+  }
+
+  function bindCharts() {
+    $app.querySelectorAll('.chart').forEach(ch => {
+      const tip = ch.parentElement.querySelector('.tip');
+      const show = e => {
+        const t = e.target.closest('.hit');
+        if (!t) return;
+        tip.textContent = t.dataset.tip;
+        tip.classList.remove('muted');
+      };
+      ch.addEventListener('click', show);
+      ch.addEventListener('mouseover', show);
+    });
+  }
+
   // ---------- เส้นทาง ----------
   async function route() {
     closeSheet();
@@ -650,6 +900,7 @@
       const m = hash.match(/^#job\/(\d+)/);
       if (m) await renderJob(m[1]);
       else if (hash === '#review') await renderReview();
+      else if (hash === '#stats') await renderStats();
       else await renderBoard();
       window.scrollTo(0, 0);
     } catch (err) {
