@@ -371,24 +371,132 @@
     ['notjob', 'AI คิดว่าไม่เกี่ยว (ไม่มั่นใจ)', it => it.action === 'ไม่เกี่ยวกับงาน']
   ];
 
+  // โหมด: คิวตรวจ (เฉพาะข้อที่ต้องตัดสิน) · ไล่ตามแชท (ทุกก้อนของวัน รวมที่ AI ตัดออก เพื่อหางานที่ AI พลาด)
   async function renderReview() {
     setTab('review');
-    $app.innerHTML = '<div class="center muted">กำลังโหลดคิวตรวจ…</div>';
-    const data = await api('review');
-    state.review = data;
+    state.reviewMode = state.reviewMode || 'queue';
     state.selected = new Set();
-    setBadge(data.items.length);
-    drawReview();
+    $app.innerHTML = reviewHeader() + '<div class="center muted">กำลังโหลด…</div>';
+    bindReviewHeader();
+    if (state.reviewMode === 'chat') {
+      state.chatDate = state.chatDate || todayKey();
+      state.chat = await api('chat', { date: state.chatDate });
+      drawChat();
+    } else {
+      state.review = await api('review');
+      setBadge(state.review.items.length);
+      drawReview();
+    }
+  }
+
+  function reviewHeader() {
+    const seg = (mode, label) => '<button class="seg' + (state.reviewMode === mode ? ' on' : '') + '" data-mode="' + mode + '">' + label + '</button>';
+    let html = '<div class="review-head"><div class="segs">' + seg('queue', 'คิวตรวจ') + seg('chat', 'ไล่ตามแชท') +
+      '</div><button class="btn" id="add-missed">＋ เพิ่มงานที่พลาด</button></div>';
+    if (state.reviewMode === 'chat') {
+      html += '<div class="datebar"><button class="btn" data-day="-1">‹</button><input type="date" id="chat-date" max="' + todayKey() +
+        '" value="' + esc(state.chatDate || todayKey()) + '"><button class="btn" data-day="1">›</button></div>';
+    }
+    return html;
+  }
+
+  function bindReviewHeader() {
+    $app.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+      if (state.reviewMode === b.dataset.mode) return;
+      state.reviewMode = b.dataset.mode;
+      renderReview().catch(showError);
+    });
+    document.getElementById('add-missed').onclick = () => missedSheet();
+    const date = document.getElementById('chat-date');
+    if (date) {
+      date.onchange = () => { state.chatDate = date.value || todayKey(); renderReview().catch(showError); };
+      $app.querySelectorAll('[data-day]').forEach(b => b.onclick = () => {
+        const d = new Date(state.chatDate + 'T12:00:00');
+        d.setDate(d.getDate() + Number(b.dataset.day));
+        const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        if (key > todayKey()) return;
+        state.chatDate = key;
+        renderReview().catch(showError);
+      });
+    }
+  }
+
+  function currentItems() {
+    const src = state.reviewMode === 'chat' ? state.chat : state.review;
+    return src ? src.items : [];
+  }
+
+  function drawChat() {
+    const data = state.chat;
+    let html = reviewHeader();
+    if (!data.items.length) {
+      html += '<div class="center muted">ยังไม่มีข้อความของวันนี้ที่ประมวลผลแล้ว<br><span class="small">(ข้อความล่าสุดใช้เวลาราว 10–15 นาที · ก่อน 8 ต.ค. ไม่มีข้อมูล)</span></div>';
+    } else {
+      html += '<p class="muted small">ทุกก้อนข้อความในกลุ่มหลัก ' + data.items.length + ' ก้อน เรียงตามเวลา · ติ๊กก้อนที่เป็นงานแล้วกดแถบด้านล่าง</p>';
+      data.items.forEach(it => { html += chatHtml(it); });
+    }
+    $app.innerHTML = html + '<div class="bulk-spacer"></div>';
+    bindReviewHeader();
+    bindPicks();
+    drawBulkBar();
+  }
+
+  function chatHtml(it) {
+    const done = !!(it.inJob || it.human);
+    let badge;
+    if (it.inJob) badge = '<span class="tag tag-job">📂 ' + esc(it.inJobLabel) + '</span>';
+    else if (it.human) badge = '<span class="tag">ตัดสินแล้ว: ' + esc(it.human) + '</span>';
+    else if (/กติกา: ข้าม/.test(it.source)) badge = '<span class="tag tag-skip">ข้าม (คำตอบรับ)</span>';
+    else badge = '<span class="tag tag-ai">AI: ' + esc(it.action) + (it.jobLabel ? ' → ' + esc(it.jobLabel) : '') + ' · ' + it.conf + '%</span>';
+    const on = state.selected.has(it.row);
+    return '<div class="rv chat' + (done ? ' done' : '') + (on ? ' picked' : '') + '"><label class="pick">' +
+      (done ? '' : '<input type="checkbox" data-pick="' + it.row + '"' + (on ? ' checked' : '') + '>') +
+      '<span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
+      '<div class="text">' + esc(it.text) + '</div>' + badge + (it.reason && !done ? '<div class="muted small">' + esc(it.reason) + '</div>' : '') + '</div>';
+  }
+
+  function bindPicks() {
+    $app.querySelectorAll('[data-pick]').forEach(box => box.onchange = () => {
+      const row = Number(box.dataset.pick);
+      if (box.checked) state.selected.add(row); else state.selected.delete(row);
+      box.closest('.rv').classList.toggle('picked', box.checked);
+      drawBulkBar();
+    });
+  }
+
+  function missedSheet() {
+    const statuses = (state.review || state.chat || {}).statuses || (state.me && state.me.statuses) || FLOW;
+    sheet('<h2>เพิ่มงานที่พลาด</h2><p class="muted small">งานที่ไม่อยู่ในคิวและหาข้อความไม่เจอ (เหมือน “ตรวจ พลาด …” ในแชท) ' +
+      'ถ้าเจอข้อความในโหมด “ไล่ตามแชท” ให้ติ๊กข้อความนั้นแทน จะได้ไทม์ไลน์ครบ</p>' +
+      '<label class="field">ชื่องาน (ลูกค้า + เครื่อง/อาการ ใส่เบอร์ได้)<input id="f-title" maxlength="120"></label>' +
+      '<label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, 'รับแจ้ง') + '</select></label>' +
+      '<div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#f-ok').onclick = async e => {
+        const title = el.querySelector('#f-title').value.trim();
+        if (!title) { toast('ใส่ชื่องานก่อน'); return; }
+        busy(e.target);
+        try {
+          const out = await api('newJob', { title, status: el.querySelector('#f-status').value });
+          closeSheet();
+          toast('เปิดงาน ' + out.label + ' ✅');
+        } catch (err) {
+          if (err.message !== 'login') toast('⚠️ ' + err.message);
+          unbusy();
+        }
+      };
+    });
   }
 
   function drawReview() {
     const data = state.review;
     if (!data.items.length) {
-      $app.innerHTML = '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ใน 3 วันล่าสุดตัดสินครบแล้ว</p></div>';
+      $app.innerHTML = reviewHeader() + '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ใน 3 วันล่าสุดตัดสินครบแล้ว · ' +
+        'ถ้าคิดว่า AI ข้ามงานไป ดูในโหมด “ไล่ตามแชท”</p></div>';
+      bindReviewHeader();
       drawBulkBar();
       return;
     }
-    let html = '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length +
+    let html = reviewHeader() + '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length +
       ' ข้อ (3 วันล่าสุด) · ติ๊กหลายข้อแล้วกดแถบด้านล่างได้</p>';
     REVIEW_GROUPS.forEach(([key, title, test]) => {
       const list = data.items.map((it, i) => [it, i]).filter(([it]) => test(it));
@@ -400,18 +508,14 @@
       html += '</section>';
     });
     $app.innerHTML = html + '<div class="bulk-spacer"></div>';
+    bindReviewHeader();
     $app.querySelectorAll('[data-act]').forEach(btn => btn.onclick = () => {
       const it = data.items[Number(btn.dataset.i)];
       if (btn.dataset.act === 'notjob') { busy(btn); decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว'); }
       else if (btn.dataset.act === 'new') newSheet([it], data.statuses);
       else attachSheet([it], data.statuses);
     });
-    $app.querySelectorAll('[data-pick]').forEach(box => box.onchange = () => {
-      const row = Number(box.dataset.pick);
-      if (box.checked) state.selected.add(row); else state.selected.delete(row);
-      box.closest('.rv').classList.toggle('picked', box.checked);
-      drawBulkBar();
-    });
+    bindPicks();
     $app.querySelectorAll('[data-all]').forEach(box => box.onchange = () => {
       const test = REVIEW_GROUPS.find(g => g[0] === box.dataset.all)[2];
       data.items.filter(test).forEach(it => { if (box.checked) state.selected.add(it.row); else state.selected.delete(it.row); });
@@ -438,7 +542,7 @@
   }
 
   function selectedItems() {
-    return state.review ? state.review.items.filter(it => state.selected.has(it.row)) : [];
+    return state.selected ? currentItems().filter(it => state.selected.has(it.row)) : [];
   }
 
   // แถบล่างเมื่อมีข้อที่ติ๊ก
@@ -459,11 +563,12 @@
       '<button class="btn" id="bk-new">＋ รวมเป็นงานใหม่ 1 งาน</button>' +
       '<button class="btn" id="bk-attach">📎 แนบเข้างาน…</button>' +
       '<button class="btn" id="bk-notjob">ไม่เกี่ยว</button></div>';
-    bar.querySelector('#bk-clear').onclick = () => { state.selected.clear(); drawReview(); };
+    bar.querySelector('#bk-clear').onclick = () => { state.selected.clear(); if (state.reviewMode === 'chat') drawChat(); else drawReview(); };
     bar.querySelector('#bk-accept').onclick = e => { busy(e.target); decideMany({ decision: 'accept' }); };
     bar.querySelector('#bk-notjob').onclick = e => { busy(e.target); decideMany({ decision: 'notjob' }); };
-    bar.querySelector('#bk-new').onclick = () => newSheet(items, state.review.statuses);
-    bar.querySelector('#bk-attach').onclick = () => attachSheet(items, state.review.statuses);
+    const statuses = (state.reviewMode === 'chat' ? state.chat : state.review).statuses;
+    bar.querySelector('#bk-new').onclick = () => newSheet(items, statuses);
+    bar.querySelector('#bk-attach').onclick = () => attachSheet(items, statuses);
   }
 
   async function decideMany(choice) {
