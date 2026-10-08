@@ -18,6 +18,7 @@
     server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
   };
 
+  const READ_ACTIONS = ['me', 'board', 'job', 'thumb', 'review'];
   const $app = document.getElementById('app');
   const state = { me: null, board: null, filter: 'open', query: '', thumbs: {} };
 
@@ -58,12 +59,26 @@
     toast.timer = setTimeout(() => { t.hidden = true; }, 2500);
   }
 
-  async function api(action, data) {
-    const res = await fetch(CFG.API_URL, {
-      method: 'POST', // ไม่ใส่ header เพิ่ม = text/plain ไม่ต้องมี preflight (Apps Script ไม่รองรับ OPTIONS)
-      body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {}))
-    });
-    const out = await res.json();
+  const API_TIMEOUT_MS = 45000;
+  async function api(action, data, attempt = 1) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+    let out;
+    try {
+      const res = await fetch(CFG.API_URL, {
+        method: 'POST', // ไม่ใส่ header เพิ่ม = text/plain ไม่ต้องมี preflight (Apps Script ไม่รองรับ OPTIONS)
+        body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {})),
+        signal: ctrl.signal
+      });
+      out = await res.json();
+    } catch (err) {
+      // เน็ตหลุด / ระบบไม่ตอบ: อ่านข้อมูลลองซ้ำ 1 ครั้ง (การบันทึกไม่ลองซ้ำเอง กันบันทึกซ้อน)
+      if (attempt === 1 && READ_ACTIONS.indexOf(action) >= 0) return api(action, data, 2);
+      throw new Error('เชื่อมต่อไม่สำเร็จ (เน็ตหลุดหรือระบบตอบช้า) ลองใหม่อีกครั้ง');
+    } finally {
+      clearTimeout(timer);
+    }
+    if (out.ms) console.log(action, out.ms + ' ms');
     if (out.error === 'login_expired' || out.error === 'login_required') {
       liff.login({ redirectUri: location.href });
       throw new Error('login');
@@ -103,10 +118,12 @@
   // ---------- บอร์ดงาน ----------
   async function renderBoard() {
     setTab('board');
-    if (!state.board) $app.innerHTML = '<div class="center muted">กำลังโหลดงาน…</div>';
-    state.board = await api('board');
-    setBadge(state.board.reviewCount);
-    drawBoard();
+    if (state.board) drawBoard(); // แสดงของเดิมทันที แล้วโหลดใหม่ตามหลัง
+    else $app.innerHTML = '<div class="center muted">กำลังโหลดงาน…</div>';
+    const fresh = await api('board');
+    state.board = fresh;
+    setBadge(fresh.reviewCount);
+    if (location.hash === '' || location.hash === '#board') drawBoard();
   }
 
   function drawBoard() {
@@ -220,9 +237,10 @@
     const cancel = document.getElementById('cancel');
     if (cancel) cancel.onclick = () => statusSheet(data, 'ยกเลิก');
     document.getElementById('rename').onclick = () => renameSheet(data);
-    document.getElementById('save-note').onclick = async () => {
+    document.getElementById('save-note').onclick = async e => {
       const note = document.getElementById('note').value.trim();
       if (!note) return;
+      busy(e.target);
       await save(data.job.no, { note }, 'บันทึกโน้ตแล้ว');
     };
     loadThumbs();
@@ -278,15 +296,29 @@
     nodes.forEach(n => io.observe(n));
   }
 
+  function busy(btn) {
+    if (!btn) return;
+    btn.disabled = true;
+    btn.dataset.label = btn.textContent;
+    btn.textContent = 'กำลังบันทึก…';
+  }
+  function unbusy() {
+    document.querySelectorAll('button[data-label]').forEach(b => {
+      b.disabled = false;
+      b.textContent = b.dataset.label;
+      delete b.dataset.label;
+    });
+  }
+
   async function save(no, changes, okMsg) {
     try {
       const data = await api('update', Object.assign({ no }, changes));
       closeSheet();
-      state.board = null; // บอร์ดต้องโหลดใหม่
       drawJob(data);
       toast(okMsg);
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ ' + err.message);
+      unbusy();
     }
   }
 
@@ -301,7 +333,7 @@
       '<div class="actions"><button class="btn primary" id="f-ok">บันทึก</button><button class="btn" data-close>ยกเลิก</button></div>';
     sheet(html, el => {
       el.querySelector('#f-ok').onclick = async e => {
-        e.target.disabled = true;
+        busy(e.target);
         const date = el.querySelector('#f-date');
         await save(data.job.no, { status, follow: date ? date.value : '', note: el.querySelector('#f-note').value.trim() },
           data.job.no + ' → ' + status);
@@ -314,7 +346,7 @@
       esc(data.job.follow || nextBusinessKey()) + '"></label><div class="actions"><button class="btn primary" id="f-ok">บันทึก</button>' +
       '<button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = async e => {
-        e.target.disabled = true;
+        busy(e.target);
         await save(data.job.no, { follow: el.querySelector('#f-date').value }, 'ตั้งวันตามแล้ว');
       };
     });
@@ -325,7 +357,7 @@
       esc(data.job.title) + '"></label><div class="actions"><button class="btn primary" id="f-ok">บันทึก</button>' +
       '<button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = async e => {
-        e.target.disabled = true;
+        busy(e.target);
         await save(data.job.no, { title: el.querySelector('#f-title').value.trim() }, 'แก้ชื่องานแล้ว');
       };
     });
@@ -346,7 +378,7 @@
     $app.innerHTML = html;
     $app.querySelectorAll('[data-act]').forEach(btn => btn.onclick = () => {
       const it = data.items[Number(btn.dataset.i)];
-      if (btn.dataset.act === 'notjob') decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว');
+      if (btn.dataset.act === 'notjob') { busy(btn); decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว'); }
       else if (btn.dataset.act === 'new') newSheet(it, data.statuses);
       else attachSheet(it, data.statuses);
     });
@@ -378,7 +410,7 @@
       '"></label><label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, it.status || 'รับแจ้ง') +
       '</select></label><div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = e => {
-        e.target.disabled = true;
+        busy(e.target);
         decide(it, { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value }, null);
       };
     });
@@ -400,7 +432,7 @@
       el.querySelector('#f-ok').onclick = e => {
         const job = (pick && pick.value) || input.value.trim();
         if (!job) { toast('ใส่เลขงานก่อน'); return; }
-        e.target.disabled = true;
+        busy(e.target);
         decide(it, { decision: 'attach', job, status: el.querySelector('#f-status').value }, null);
       };
     });
@@ -410,11 +442,11 @@
     try {
       const out = await api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice));
       closeSheet();
-      state.board = null;
       toast(okMsg || (out.verdict + ' ✅'));
       renderReview();
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ ' + err.message);
+      unbusy();
     }
   }
 
@@ -441,12 +473,13 @@
       const params = new URLSearchParams(location.search);
       if (params.get('job') && !location.hash) location.hash = '#job/' + params.get('job').replace(/\D/g, '');
       if (params.get('view') === 'review' && !location.hash) location.hash = '#review';
-      const me = await api('me');
-      state.me = me;
-      document.getElementById('me').textContent = me.name;
-      setBadge(me.reviewCount);
       window.addEventListener('hashchange', route);
       route();
+      api('me').then(me => {
+        state.me = me;
+        document.getElementById('me').textContent = me.name;
+        setBadge(me.reviewCount);
+      }).catch(() => {}); // หน้าหลักแสดงข้อผิดพลาดเองอยู่แล้ว
     } catch (err) {
       showError(err);
     }
