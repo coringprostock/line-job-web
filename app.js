@@ -15,7 +15,7 @@
     not_found: 'ไม่พบงานนี้', bad_status: 'สถานะไม่ถูกต้อง', past_date: 'วันตามต้องเป็นวันนี้หรือหลังจากนี้',
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
     already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
-    server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
+    nothing_selected: 'ยังไม่ได้เลือกข้อ', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
   };
 
   const READ_ACTIONS = ['me', 'board', 'job', 'thumb', 'review'];
@@ -364,24 +364,60 @@
   }
 
   // ---------- คิวตรวจ ----------
+  // แบ่ง 3 กลุ่ม · ติ๊กหลายข้อแล้วกดแถบด้านล่างทีเดียว
+  const REVIEW_GROUPS = [
+    ['need', 'ต้องตัดสิน (งานใหม่ / ไม่แน่ใจ)', it => it.action !== 'อัปเดตงานเดิม' && it.action !== 'ไม่เกี่ยวกับงาน'],
+    ['attach', 'AI เสนอแนบเข้างานเดิม', it => it.action === 'อัปเดตงานเดิม'],
+    ['notjob', 'AI คิดว่าไม่เกี่ยว (ไม่มั่นใจ)', it => it.action === 'ไม่เกี่ยวกับงาน']
+  ];
+
   async function renderReview() {
     setTab('review');
     $app.innerHTML = '<div class="center muted">กำลังโหลดคิวตรวจ…</div>';
     const data = await api('review');
+    state.review = data;
+    state.selected = new Set();
     setBadge(data.items.length);
+    drawReview();
+  }
+
+  function drawReview() {
+    const data = state.review;
     if (!data.items.length) {
       $app.innerHTML = '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ใน 3 วันล่าสุดตัดสินครบแล้ว</p></div>';
+      drawBulkBar();
       return;
     }
-    let html = '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length + ' ข้อ (3 วันล่าสุด)</p>';
-    data.items.forEach((it, i) => { html += reviewHtml(it, i); });
-    $app.innerHTML = html;
+    let html = '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length +
+      ' ข้อ (3 วันล่าสุด) · ติ๊กหลายข้อแล้วกดแถบด้านล่างได้</p>';
+    REVIEW_GROUPS.forEach(([key, title, test]) => {
+      const list = data.items.map((it, i) => [it, i]).filter(([it]) => test(it));
+      if (!list.length) return;
+      const allOn = list.every(([it]) => state.selected.has(it.row));
+      html += '<section class="group"><h3 class="group-head"><label><input type="checkbox" data-all="' + key + '"' +
+        (allOn ? ' checked' : '') + '> ' + esc(title) + ' (' + list.length + ')</label></h3>';
+      list.forEach(([it, i]) => { html += reviewHtml(it, i); });
+      html += '</section>';
+    });
+    $app.innerHTML = html + '<div class="bulk-spacer"></div>';
     $app.querySelectorAll('[data-act]').forEach(btn => btn.onclick = () => {
       const it = data.items[Number(btn.dataset.i)];
       if (btn.dataset.act === 'notjob') { busy(btn); decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว'); }
-      else if (btn.dataset.act === 'new') newSheet(it, data.statuses);
-      else attachSheet(it, data.statuses);
+      else if (btn.dataset.act === 'new') newSheet([it], data.statuses);
+      else attachSheet([it], data.statuses);
     });
+    $app.querySelectorAll('[data-pick]').forEach(box => box.onchange = () => {
+      const row = Number(box.dataset.pick);
+      if (box.checked) state.selected.add(row); else state.selected.delete(row);
+      box.closest('.rv').classList.toggle('picked', box.checked);
+      drawBulkBar();
+    });
+    $app.querySelectorAll('[data-all]').forEach(box => box.onchange = () => {
+      const test = REVIEW_GROUPS.find(g => g[0] === box.dataset.all)[2];
+      data.items.filter(test).forEach(it => { if (box.checked) state.selected.add(it.row); else state.selected.delete(it.row); });
+      drawReview();
+    });
+    drawBulkBar();
   }
 
   function reviewHtml(it, i) {
@@ -392,39 +428,88 @@
     if (it.status) ai += '<br>สถานะ: ' + esc(it.status);
     if (it.candidates.length) ai += '<br>อาจเป็น: ' + it.candidates.map(c => esc(c.label)).join(' / ');
     ai += '<br><span class="' + confCls + '">มั่นใจ ' + it.conf + '%</span> · ' + esc(it.reason);
-    return '<div class="rv"><div class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</div>' +
-      '<div class="text">' + esc(it.text) + '</div><div class="ai">' + ai + '</div>' +
-      (it.inJob ? '<p class="small">📎 ข้อความนี้อยู่ใน ' + esc(it.inJobLabel) + ' แล้ว</p>' : '') +
-      '<div class="actions">' +
-      (it.inJob ? '' : '<button class="btn' + (it.action === 'งานใหม่' ? ' primary' : '') + '" data-act="new" data-i="' + i + '">＋ งานใหม่</button>') +
+    const on = state.selected.has(it.row);
+    return '<div class="rv' + (on ? ' picked' : '') + '"><label class="pick"><input type="checkbox" data-pick="' + it.row + '"' +
+      (on ? ' checked' : '') + '><span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
+      '<div class="text">' + esc(it.text) + '</div><div class="ai">' + ai + '</div><div class="actions">' +
+      '<button class="btn' + (it.action === 'งานใหม่' ? ' primary' : '') + '" data-act="new" data-i="' + i + '">＋ งานใหม่</button>' +
       '<button class="btn' + (it.action === 'อัปเดตงานเดิม' ? ' primary' : '') + '" data-act="attach" data-i="' + i + '">📎 แนบงานเดิม</button>' +
       '<button class="btn" data-act="notjob" data-i="' + i + '">ไม่เกี่ยว</button></div></div>';
+  }
+
+  function selectedItems() {
+    return state.review ? state.review.items.filter(it => state.selected.has(it.row)) : [];
+  }
+
+  // แถบล่างเมื่อมีข้อที่ติ๊ก
+  function drawBulkBar() {
+    let bar = document.getElementById('bulkbar');
+    const items = location.hash === '#review' ? selectedItems() : [];
+    if (!items.length) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'bulkbar';
+      bar.className = 'bulkbar';
+      document.body.appendChild(bar);
+    }
+    const unsure = items.filter(it => it.action === 'ไม่แน่ใจ' || !['งานใหม่', 'อัปเดตงานเดิม', 'ไม่เกี่ยวกับงาน'].includes(it.action)).length;
+    bar.innerHTML = '<div class="bulk-row"><b>เลือก ' + items.length + ' ข้อ</b><button class="icon-btn" id="bk-clear">ล้าง</button></div>' +
+      '<div class="bulk-row actions">' +
+      '<button class="btn primary" id="bk-accept">✓ ทำตาม AI' + (unsure ? ' (ข้าม ' + unsure + ' ข้อไม่แน่ใจ)' : '') + '</button>' +
+      '<button class="btn" id="bk-new">＋ รวมเป็นงานใหม่ 1 งาน</button>' +
+      '<button class="btn" id="bk-attach">📎 แนบเข้างาน…</button>' +
+      '<button class="btn" id="bk-notjob">ไม่เกี่ยว</button></div>';
+    bar.querySelector('#bk-clear').onclick = () => { state.selected.clear(); drawReview(); };
+    bar.querySelector('#bk-accept').onclick = e => { busy(e.target); decideMany({ decision: 'accept' }); };
+    bar.querySelector('#bk-notjob').onclick = e => { busy(e.target); decideMany({ decision: 'notjob' }); };
+    bar.querySelector('#bk-new').onclick = () => newSheet(items, state.review.statuses);
+    bar.querySelector('#bk-attach').onclick = () => attachSheet(items, state.review.statuses);
+  }
+
+  async function decideMany(choice) {
+    const items = selectedItems().map(it => ({ row: it.row, msgId: it.msgId }));
+    try {
+      const out = await api('decideMany', Object.assign({ items }, choice));
+      closeSheet();
+      toast('ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' : '') + (out.job ? ' · ' + out.job : '') + ' ✅');
+      renderReview();
+    } catch (err) {
+      if (err.message !== 'login') toast('⚠️ ' + err.message);
+      unbusy();
+    }
   }
 
   const statusOptions = (statuses, selected, withKeep) =>
     (withKeep ? '<option value="">ไม่เปลี่ยนสถานะ</option>' : '') +
     statuses.map(s => '<option' + (s === selected ? ' selected' : '') + '>' + esc(s) + '</option>').join('');
 
-  function newSheet(it, statuses) {
-    sheet('<h2>เปิดงานใหม่</h2><label class="field">ชื่องาน<input id="f-title" maxlength="120" value="' + esc(it.title || '') +
-      '"></label><label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, it.status || 'รับแจ้ง') +
+  function newSheet(items, statuses) {
+    const first = items[0];
+    const many = items.length > 1;
+    sheet('<h2>' + (many ? 'รวม ' + items.length + ' ข้อเป็นงานใหม่ 1 งาน' : 'เปิดงานใหม่') + '</h2>' +
+      '<label class="field">ชื่องาน<input id="f-title" maxlength="120" value="' + esc(first.title || '') +
+      '"></label><label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, first.status || 'รับแจ้ง') +
       '</select></label><div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = e => {
         busy(e.target);
-        decide(it, { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value }, null);
+        const choice = { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value };
+        if (many) decideMany(choice); else decide(first, choice, null);
       };
     });
   }
 
-  function attachSheet(it, statuses) {
+  function attachSheet(items, statuses) {
     const opts = [];
-    if (it.job) opts.push({ no: it.job, label: it.jobLabel });
-    it.candidates.forEach(c => { if (!opts.some(o => o.no === c.no)) opts.push(c); });
-    sheet('<h2>แนบเข้างานเดิม</h2><label class="field">เลขงาน' +
+    items.forEach(it => {
+      if (it.job && !opts.some(o => o.no === it.job)) opts.push({ no: it.job, label: it.jobLabel });
+      it.candidates.forEach(c => { if (!opts.some(o => o.no === c.no)) opts.push(c); });
+    });
+    const many = items.length > 1;
+    sheet('<h2>' + (many ? 'แนบ ' + items.length + ' ข้อเข้างานเดียวกัน' : 'แนบเข้างานเดิม') + '</h2><label class="field">เลขงาน' +
       (opts.length ? '<select id="f-pick">' + opts.map(o => '<option value="' + esc(o.no) + '">' + esc(o.label) + '</option>').join('') +
         '<option value="">พิมพ์เลขงานเอง…</option></select>' : '') +
       '<input id="f-job" inputmode="numeric" placeholder="เช่น 131"' + (opts.length ? ' hidden' : '') + '></label>' +
-      '<label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, it.status, true) + '</select></label>' +
+      '<label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, many ? '' : items[0].status, true) + '</select></label>' +
       '<div class="actions"><button class="btn primary" id="f-ok">แนบ</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       const pick = el.querySelector('#f-pick');
       const input = el.querySelector('#f-job');
@@ -433,7 +518,8 @@
         const job = (pick && pick.value) || input.value.trim();
         if (!job) { toast('ใส่เลขงานก่อน'); return; }
         busy(e.target);
-        decide(it, { decision: 'attach', job, status: el.querySelector('#f-status').value }, null);
+        const choice = { decision: 'attach', job, status: el.querySelector('#f-status').value };
+        if (many) decideMany(choice); else decide(items[0], choice, null);
       };
     });
   }
@@ -453,6 +539,7 @@
   // ---------- เส้นทาง ----------
   async function route() {
     closeSheet();
+    if (location.hash !== '#review') { const bar = document.getElementById('bulkbar'); if (bar) bar.remove(); }
     const hash = location.hash || '#board';
     try {
       const m = hash.match(/^#job\/(\d+)/);

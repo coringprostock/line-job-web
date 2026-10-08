@@ -163,3 +163,15 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
   background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 999px; max-width: 90vw;
 }
+
+/* คิวตรวจ: ติ๊กหลายข้อ */
+.group-head label, .rv .pick { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.group-head input, .rv .pick input { width: 20px; height: 20px; accent-color: var(--accent); flex: 0 0 auto; }
+.rv.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bulk-spacer { height: 140px; }
+.bulkbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; background: var(--card); border-top: 1px solid var(--line);
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 16px rgba(0, 0, 0, .08);
+}
+.bulk-row { max-width: 760px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bulk-row.actions { justify-content: flex-start; margin: 8px auto 0; }
