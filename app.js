@@ -913,9 +913,12 @@
       await liff.init({ liffId: CFG.LIFF_ID });
       if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
       // ลิงก์จากการ์ดงานในไลน์: liff.line.me/<id>?job=0131 / ?view=review
+      // เปิดเว็บครั้งแรกเข้าบอร์ดงานเสมอ (LINE อาจเปิด URL เดิมที่ค้างแท็บเก่าไว้ เช่น #stats)
+      // ยกเว้นลิงก์ "เปิดหน้างาน" จากการ์ดในแชท (?job=0131) หรือ ?view=review
       const params = new URLSearchParams(location.search);
-      if (params.get('job') && !location.hash) location.hash = '#job/' + params.get('job').replace(/\D/g, '');
-      if (params.get('view') === 'review' && !location.hash) location.hash = '#review';
+      const start = params.get('job') ? '#job/' + params.get('job').replace(/\D/g, '')
+        : params.get('view') === 'review' ? '#review' : '#board';
+      if (location.hash !== start) history.replaceState(null, '', location.pathname + location.search + start);
       window.addEventListener('hashchange', route);
       route();
       api('me').then(me => {
