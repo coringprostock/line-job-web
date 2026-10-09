@@ -29,7 +29,8 @@
     not_found: 'ไม่พบงานนี้', bad_status: 'สถานะไม่ถูกต้อง', past_date: 'วันตามต้องเป็นวันนี้หรือหลังจากนี้',
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
     already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
-    nothing_selected: 'ยังไม่ได้เลือกข้อ', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
+    nothing_selected: 'ยังไม่ได้เลือกข้อ', not_in_job: 'ข้อความนี้ไม่ได้อยู่ในงานนี้แล้ว (มีคนย้ายไปก่อน) โหลดหน้าใหม่',
+    same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
   };
 
   const READ_ACTIONS = ['me', 'board', 'job', 'thumb', 'review'];
@@ -327,10 +328,18 @@
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ตลงไทม์ไลน์ เช่น โทรแล้วลูกค้าไม่รับ"></textarea>' +
       '<button class="btn primary" id="save-note">บันทึก</button></div>';
 
-    html += '<h3>ไทม์ไลน์</h3><ul class="timeline">';
+    html += '<h3>ไทม์ไลน์</h3><p class="muted small">ข้อความหรือรูปที่ไม่ใช่ของงานนี้ ติ๊กแล้วย้ายไปงานที่ถูก หรือเอาออกได้</p><ul class="timeline">';
     data.events.forEach(ev => { html += eventHtml(ev); });
-    html += '</ul>';
+    html += '</ul><div class="bulk-spacer"></div>';
     $app.innerHTML = html;
+    state.jobData = data;
+    state.moveSel = new Set();
+    drawMoveBar();
+    $app.querySelectorAll('[data-move]').forEach(box => box.onchange = () => {
+      if (box.checked) state.moveSel.add(box.dataset.move); else state.moveSel.delete(box.dataset.move);
+      box.closest('li').classList.toggle('picked', box.checked);
+      drawMoveBar();
+    });
 
     const cur = $app.querySelector('.step.current');
     if (cur) cur.scrollIntoView({ inline: 'center', block: 'nearest' });
@@ -372,8 +381,65 @@
       body += '<div class="muted small">[' + esc(ev.msg.type) + ']</div>';
     }
     const when = (ev.msg && ev.msg.time) || ev.time;
-    return '<li class="' + kindClass + '"><div class="when">' + esc(fmtDateTime(when)) +
+    const pick = ev.movable ? '<label class="pick-inline"><input type="checkbox" data-move="' + esc(ev.msgId) + '"></label>' : '';
+    return '<li class="' + kindClass + '">' + pick + '<div class="when">' + esc(fmtDateTime(when)) +
       (ev.job && ev.job !== (state.currentJob || ev.job) ? ' · ' + esc(ev.job) : '') + '</div>' + body + '</li>';
+  }
+
+  // แถบล่างของหน้างาน: ย้าย / แยกเป็นงานใหม่ / เอาออก ข้อความที่ติ๊ก
+  function drawMoveBar() {
+    let bar = document.getElementById('movebar');
+    const n = state.moveSel ? state.moveSel.size : 0;
+    if (!n || !/^#job\//.test(location.hash)) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'movebar';
+      bar.className = 'bulkbar';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML = '<div class="bulk-row"><b>เลือก ' + n + ' ข้อความ/รูป</b><button class="icon-btn" id="mv-clear">ล้าง</button></div>' +
+      '<div class="bulk-row actions"><button class="btn primary" id="mv-move">📎 ย้ายไปงานอื่น…</button>' +
+      '<button class="btn" id="mv-new">＋ แยกเป็นงานใหม่</button><button class="btn danger" id="mv-remove">🗑 เอาออกจากงานนี้</button></div>';
+    bar.querySelector('#mv-clear').onclick = () => drawJob(state.jobData);
+    bar.querySelector('#mv-move').onclick = () => sheet('<h2>ย้าย ' + n + ' ข้อความ/รูป ไปงานอื่น</h2>' +
+      '<label class="field">เลขงานที่ถูกต้อง<input id="f-job" inputmode="numeric" placeholder="เช่น 131"></label>' +
+      '<p class="muted small">หาเลขงานไม่เจอ? ปิดหน้านี้แล้วค้นในบอร์ดงานก่อน</p>' +
+      '<div class="actions"><button class="btn primary" id="f-ok">ย้าย</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#f-ok').onclick = e => {
+        const to = el.querySelector('#f-job').value.trim();
+        if (!to) { toast('ใส่เลขงานก่อน'); return; }
+        busy(e.target);
+        moveMsgs({ to });
+      };
+    });
+    bar.querySelector('#mv-new').onclick = () => sheet('<h2>แยก ' + n + ' ข้อความ/รูป เป็นงานใหม่</h2>' +
+      '<label class="field">ชื่องาน (ลูกค้า + เครื่อง/อาการ)<input id="f-title" maxlength="120"></label>' +
+      '<label class="field">สถานะ<select id="f-status">' + statusOptions(state.jobData.statuses, 'รับแจ้ง') + '</select></label>' +
+      '<div class="actions"><button class="btn primary" id="f-ok">เปิดงานใหม่</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#f-ok').onclick = e => {
+        const title = el.querySelector('#f-title').value.trim();
+        if (!title) { toast('ใส่ชื่องานก่อน'); return; }
+        busy(e.target);
+        moveMsgs({ to: 'new', title, status: el.querySelector('#f-status').value });
+      };
+    });
+    bar.querySelector('#mv-remove').onclick = () => sheet('<h2>เอา ' + n + ' ข้อความ/รูป ออกจากงานนี้?</h2>' +
+      '<p class="muted small">ใช้เมื่อไม่เกี่ยวกับงานไหนเลย (ถ้าเป็นของงานอื่น ให้ใช้ “ย้ายไปงานอื่น”) · ประวัติยังเก็บไว้ในไทม์ไลน์</p>' +
+      '<div class="actions"><button class="btn danger" id="f-ok">เอาออก</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#f-ok').onclick = e => { busy(e.target); moveMsgs({ to: '' }); };
+    });
+  }
+
+  async function moveMsgs(choice) {
+    try {
+      const data = await api('moveMsgs', Object.assign({ no: state.jobData.job.no, msgIds: Array.from(state.moveSel) }, choice));
+      closeSheet();
+      drawJob(data);
+      toast(data.moved.to ? 'ย้าย ' + data.moved.count + ' รายการไป ' + data.moved.label + ' ✅' : 'เอาออก ' + data.moved.count + ' รายการแล้ว ✅');
+    } catch (err) {
+      if (err.message !== 'login') toast('⚠️ ' + err.message);
+      unbusy();
+    }
   }
 
   function loadThumbs() {
@@ -895,6 +961,7 @@
   async function route() {
     closeSheet();
     if (location.hash !== '#review') { const bar = document.getElementById('bulkbar'); if (bar) bar.remove(); }
+    { const mv = document.getElementById('movebar'); if (mv) mv.remove(); }
     const hash = location.hash || '#board';
     try {
       const m = hash.match(/^#job\/(\d+)/);

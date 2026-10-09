@@ -256,3 +256,9 @@ details.table summary { color: var(--muted); cursor: pointer; }
 details.table table { border-collapse: collapse; width: 100%; margin-top: 6px; }
 details.table td, details.table th { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: right; }
 details.table td:first-child, details.table th:first-child { text-align: left; }
+
+/* หน้างาน: ติ๊กข้อความในไทม์ไลน์ */
+.timeline li { padding-right: 34px; }
+.timeline li.picked { background: var(--ph-start-bg); border-radius: 8px; }
+.pick-inline { position: absolute; right: 4px; top: 2px; }
+.pick-inline input { width: 22px; height: 22px; accent-color: var(--accent); }
