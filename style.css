@@ -54,7 +54,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tabs a {
   text-decoration: none; padding: 6px 12px; border-radius: 999px; color: var(--muted); white-space: nowrap;
 }
-.tabs a.active { background: var(--chip); color: var(--text); font-weight: 600; }
+.tabs a.active { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.tabs { overflow-x: auto; }
 .me { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
 .badge {
   display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger);
