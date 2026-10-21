@@ -29,7 +29,7 @@
     not_found: 'ไม่พบงานนี้', bad_status: 'สถานะไม่ถูกต้อง', past_date: 'วันตามต้องเป็นวันนี้หรือหลังจากนี้',
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
     already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
-    nothing_selected: 'ยังไม่ได้เลือกข้อ', not_in_job: 'ข้อความนี้ไม่ได้อยู่ในงานนี้แล้ว (มีคนย้ายไปก่อน) โหลดหน้าใหม่',
+    unknown_action: 'ระบบยังไม่รองรับคำสั่งนี้ (อาจยังไม่ได้ deploy)', nothing_selected: 'ยังไม่ได้เลือกข้อ', not_in_job: 'ข้อความนี้ไม่ได้อยู่ในงานนี้แล้ว (มีคนย้ายไปก่อน) โหลดหน้าใหม่',
     same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
   };
 
@@ -80,7 +80,8 @@
     const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
     let out;
     try {
-      const res = await fetch(CFG.API_URL, {
+      // มี Worker (Cloudflare) ใช้ Worker ก่อน อ่านเร็วกว่ามาก · ไม่มีก็เรียก Apps Script ตรงเหมือนเดิม
+      const res = await fetch(CFG.WORKER_URL || CFG.API_URL, {
         method: 'POST', // ไม่ใส่ header เพิ่ม = text/plain ไม่ต้องมี preflight (Apps Script ไม่รองรับ OPTIONS)
         body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {})),
         signal: ctrl.signal
@@ -135,7 +136,8 @@
     setTab('board');
     if (state.board) drawBoard(); // แสดงของเดิมทันที แล้วโหลดใหม่ตามหลัง
     else $app.innerHTML = '<div class="center muted">กำลังโหลดงาน…</div>';
-    const fresh = await api('board');
+    const fresh = await api('board', state.forceFresh ? { fresh: true } : {});
+    state.forceFresh = false;
     state.board = fresh;
     setBadge(fresh.reviewCount);
     if (location.hash === '' || location.hash === '#board') drawBoard();
@@ -167,7 +169,7 @@
     }
     const chip = (key, label) => '<button class="chip' + (state.filter === key && !q ? ' on' : '') + '" data-filter="' + key + '">' +
       label + ' ' + counts[key] + '</button>';
-    let html = viewToggle() + '<div class="toolbar"><input class="search" id="q" type="search" placeholder="ค้นหา เลขงาน ชื่อ ลูกค้า เบอร์" value="' +
+    let html = viewToggle() + asOfLine() + '<div class="toolbar"><input class="search" id="q" type="search" placeholder="ค้นหา เลขงาน ชื่อ ลูกค้า เบอร์" value="' +
       esc(state.query) + '"><div class="chips">' + chip('open', 'เปิดอยู่') + chip('due', '⏰ ถึงวันตาม') +
       chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') +
       (state.filter.indexOf(':') > 0 ? '<button class="chip on" data-filter="open">' + esc(state.filter.split(':')[1]) + ' ✕</button>' : '') +
@@ -198,6 +200,18 @@
       drawBoard();
     });
     bindViewToggle();
+    bindRefresh();
+  }
+
+  // ข้อมูลบอร์ดมาจากที่พักข้อมูล (อัปเดตทุก 5 นาที และทันทีหลังบันทึก) · กดเพื่อดึงล่าสุดจากชีต
+  function asOfLine() {
+    const t = state.board && state.board.asOf;
+    if (!t) return '';
+    return '<p class="muted small asof">ข้อมูล ณ ' + esc(fmtDateTime(t)) + ' · <button class="link-btn" id="refresh">รีเฟรช</button></p>';
+  }
+  function bindRefresh() {
+    const b = document.getElementById('refresh');
+    if (b) b.onclick = () => { b.textContent = 'กำลังโหลด…'; state.forceFresh = true; renderBoard().catch(showError); };
   }
 
   function viewToggle() {
@@ -479,13 +493,32 @@
   }
 
   async function save(no, changes, okMsg) {
+    const before = state.jobData;
+    // แสดงผลทันที (ไม่ต้องรอระบบ 3–5 วินาที) แล้วค่อยแทนด้วยข้อมูลจริงเมื่อบันทึกเสร็จ
+    if (before && before.job.no === no) {
+      const local = JSON.parse(JSON.stringify(before));
+      const me = (state.me && state.me.name ? state.me.name : 'คุณ') + ' (เว็บ)';
+      const now = new Date().toISOString();
+      if (changes.status) {
+        local.events.push({ time: now, by: me, kind: 'เปลี่ยนสถานะ', detail: local.job.status + ' → ' + changes.status + ' (กำลังบันทึก…)' });
+        local.job.status = changes.status;
+        local.job.closed = ['ปิด', 'ยกเลิก'].indexOf(changes.status) >= 0;
+      }
+      if (changes.follow) local.job.follow = changes.follow;
+      if (changes.title) local.job.title = changes.title;
+      if (changes.note) local.events.push({ time: now, by: me, kind: 'โน้ต', detail: changes.note + ' (กำลังบันทึก…)' });
+      closeSheet();
+      drawJob(local);
+      state.jobData = before; // ข้อมูลจริงยังเป็นของเดิมจนกว่าระบบตอบ
+    }
     try {
       const data = await api('update', Object.assign({ no }, changes));
       closeSheet();
-      drawJob(data);
-      toast(okMsg);
+      if (/^#job\//.test(location.hash)) drawJob(data);
+      toast(okMsg + ' ✅');
     } catch (err) {
-      if (err.message !== 'login') toast('⚠️ ' + err.message);
+      if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message);
+      if (before && /^#job\//.test(location.hash)) drawJob(before);
       unbusy();
     }
   }
@@ -658,14 +691,14 @@
   function drawReview() {
     const data = state.review;
     if (!data.items.length) {
-      $app.innerHTML = reviewHeader() + '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ใน 3 วันล่าสุดตัดสินครบแล้ว · ' +
+      $app.innerHTML = reviewHeader() + '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ตัดสินครบทุกข้อแล้ว · ' +
         'ถ้าคิดว่า AI ข้ามงานไป ดูในโหมด “ไล่ตามแชท”</p></div>';
       bindReviewHeader();
       drawBulkBar();
       return;
     }
     let html = reviewHeader() + '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length +
-      ' ข้อ (3 วันล่าสุด) · ติ๊กหลายข้อแล้วกดแถบด้านล่างได้</p>';
+      ' ข้อ เรียงจากเก่าไปใหม่ · ติ๊กหลายข้อแล้วกดแถบด้านล่างได้</p>';
     REVIEW_GROUPS.forEach(([key, title, test]) => {
       const list = data.items.map((it, i) => [it, i]).filter(([it]) => test(it));
       if (!list.length) return;
@@ -957,6 +990,272 @@
     });
   }
 
+  // ---------- ระบบใหม่บน Cloudflare (ค้นหา / ฟอร์มเปิดงาน) ----------
+  const PROVINCES = ['กรุงเทพมหานคร', 'กระบี่', 'กาญจนบุรี', 'กาฬสินธุ์', 'กำแพงเพชร', 'ขอนแก่น', 'จันทบุรี', 'ฉะเชิงเทรา', 'ชลบุรี', 'ชัยนาท',
+    'ชัยภูมิ', 'ชุมพร', 'เชียงราย', 'เชียงใหม่', 'ตรัง', 'ตราด', 'ตาก', 'นครนายก', 'นครปฐม', 'นครพนม', 'นครราชสีมา', 'นครศรีธรรมราช',
+    'นครสวรรค์', 'นนทบุรี', 'นราธิวาส', 'น่าน', 'บึงกาฬ', 'บุรีรัมย์', 'ปทุมธานี', 'ประจวบคีรีขันธ์', 'ปราจีนบุรี', 'ปัตตานี',
+    'พระนครศรีอยุธยา', 'พะเยา', 'พังงา', 'พัทลุง', 'พิจิตร', 'พิษณุโลก', 'เพชรบุรี', 'เพชรบูรณ์', 'แพร่', 'ภูเก็ต', 'มหาสารคาม',
+    'มุกดาหาร', 'แม่ฮ่องสอน', 'ยโสธร', 'ยะลา', 'ร้อยเอ็ด', 'ระนอง', 'ระยอง', 'ราชบุรี', 'ลพบุรี', 'ลำปาง', 'ลำพูน', 'เลย', 'ศรีสะเกษ',
+    'สกลนคร', 'สงขลา', 'สตูล', 'สมุทรปราการ', 'สมุทรสงคราม', 'สมุทรสาคร', 'สระแก้ว', 'สระบุรี', 'สิงห์บุรี', 'สุโขทัย', 'สุพรรณบุรี',
+    'สุราษฎร์ธานี', 'สุรินทร์', 'หนองคาย', 'หนองบัวลำภู', 'อ่างทอง', 'อำนาจเจริญ', 'อุดรธานี', 'อุตรดิตถ์', 'อุทัยธานี', 'อุบลราชธานี'];
+  const PRODUCT_HINTS = ['รถขุด TREX T1', 'รถขุด T1.2', 'รถขุด T1.3', 'รถขุด T1.4L', 'รถขุด T1.5K', 'รถขุด T1.6 แทรคเหล็ก', 'รถบด RL600',
+    'รถบดนั่งขับ 1.2 ตัน', 'เครื่องตบดิน', 'รถดั๊มพ์ตีนตะขาบ', 'เครื่องตัดคอนกรีต T800B', 'เครื่องตัดคอนกรีต Turbo Max T-600D',
+    'เครื่องดัดเหล็ก นิวตัน 25', 'เครื่องดัดเหล็ก นิวตัน 32', 'เครื่องดัดเหล็ก B16', 'เครื่องตัดเหล็ก C32', 'เครื่องเจาะคอริ่ง (ดำ 3800W)',
+    'เครื่องเจาะคอริ่ง (น้ำเงิน 3500W)', 'หุ่นยนต์ตัดลวด (wire saw)', 'เครื่องต๊าป 4 นิ้ว', 'เครื่องย้ำโซ่', 'เครื่องปั่นไฟ TREX'];
+  const CORE_ERRORS = {
+    bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
+    bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
+    core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน'
+  };
+  const intake = { files: [], attachTo: '' };   // ฟอร์มที่กรอกค้างไว้ (สลับแท็บแล้วกลับมาได้)
+
+  async function core(action, data) {
+    if (!CFG.CORE_URL) throw new Error('ยังไม่ได้ตั้ง CORE_URL ใน config.js');
+    const res = await fetch(CFG.CORE_URL + '/api', { method: 'POST', body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {})) });
+    const out = await res.json().catch(() => ({ error: 'server_error' }));
+    if (out.error === 'login_expired' || out.error === 'login_required') { liff.login({ redirectUri: location.href }); throw new Error('login'); }
+    if (out.error) throw new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error);
+    return out;
+  }
+
+  /** รูปย่อด้านยาว ≤1600 px เป็น JPEG ก่อนส่ง (รูปจากมือถือ 3–8 MB เหลือ ~300 KB) · คลิปส่งตามเดิม */
+  function shrink(file, max = 1600) {
+    if (!file.type.startsWith('image/')) return Promise.resolve(file);
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(img.src);
+        c.toBlob(b => resolve(b || file), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => resolve(file);
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  const toDataUrl = blob => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+
+  async function uploadFile(file) {
+    const blob = await shrink(file);
+    const res = await fetch(CFG.CORE_URL + '/api/upload', { method: 'POST', body: blob,
+      headers: { 'X-Id-Token': liff.getIDToken(), 'Content-Type': blob.type || file.type } });
+    const out = await res.json().catch(() => ({ error: 'server_error' }));
+    if (out.error) throw new Error(CORE_ERRORS[out.error] || out.error);
+    return out.key;
+  }
+
+  // ----- ค้นหา -----
+  async function renderSearch() {
+    setTab('search');
+    const q = state.searchQ || '';
+    $app.innerHTML = '<div class="toolbar"><div class="search-row"><input class="search" id="sq" type="search" enterkeyhint="search" ' +
+      'placeholder="ชื่อ เบอร์ รุ่น SN จังหวัด หรือคำในแชท" value="' + esc(q) + '"><button class="btn primary" id="sgo">ค้นหา</button></div>' +
+      '<label class="btn" id="simg-l">📷 ค้นด้วยรูป (ป้ายเครื่อง/SN/นามบัตร)<input type="file" id="simg" accept="image/*" hidden></label></div><div id="sres">' +
+      (state.searchHtml || '<div class="center muted">ค้นประวัติจากทุกงานและแชทเก่า</div>') + '</div>';
+    const input = document.getElementById('sq');
+    const go = async () => {
+      const v = input.value.trim();
+      if (v.length < 2) return toast('พิมพ์อย่างน้อย 2 ตัวอักษร');
+      state.searchQ = v;
+      document.getElementById('sres').innerHTML = '<div class="center muted">กำลังค้น…</div>';
+      try { drawResults(await core('search', { q: v }), v); } catch (err) { if (err.message !== 'login') document.getElementById('sres').innerHTML = '<div class="center">⚠️ ' + esc(err.message) + '</div>'; }
+    };
+    document.getElementById('sgo').onclick = go;
+    input.onkeydown = e => { if (e.key === 'Enter') go(); };
+    document.getElementById('simg').onchange = async e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      document.getElementById('sres').innerHTML = '<div class="center muted">AI กำลังอ่านรูป…</div>';
+      try {
+        const blob = await shrink(f, 1400);
+        const out = await core('searchImage', { image: await toDataUrl(blob), mime: 'image/jpeg' });
+        const v = out.vision || {};
+        const head = '<div class="panel-box"><b>AI อ่านได้:</b> ' + esc([v.product, v.model, v.serial && 'SN ' + v.serial, (v.names || []).join(', '), (v.phones || []).join(', ')]
+          .filter(Boolean).join(' · ') || v.summary || '-') + (out.terms.length ? '<div class="muted small">ค้นด้วย: ' + esc(out.terms.join(' · ')) + '</div>' : '') + '</div>';
+        drawResults(out, out.terms[0] || '', head);
+      } catch (err) { if (err.message !== 'login') document.getElementById('sres').innerHTML = '<div class="center">⚠️ ' + esc(err.message) + '</div>'; }
+      e.target.value = '';
+    };
+  }
+
+  function hitHtml(h) {
+    const icon = { msg: '💬', img: '🖼', form: '📝' }[h.kind] || '';
+    return '<div class="hit-line">' + icon + ' ' + (h.time ? '<span class="muted">' + esc(fmtDate(h.time)) + (h.who ? ' ' + esc(h.who) : '') + ':</span> ' : '') + esc(h.text) + '</div>';
+  }
+
+  function drawResults(out, q, head) {
+    let html = head || '';
+    if (!out.jobs.length && !out.loose.length) html += '<div class="center muted">ไม่พบ "' + esc(q) + '"</div>';
+    if (out.jobs.length) html += '<div class="muted small">งานที่เกี่ยวข้อง ' + out.jobs.length + ' งาน</div>';
+    out.jobs.forEach(j => {
+      const target = j.merged || j.no;
+      html += '<a class="card ' + ph(j.status) + '" href="#job/' + noDigits(target) + '"><div class="top"><span class="no">' + esc(j.no) + '</span><span class="title">' +
+        esc(j.title) + '</span></div><div class="meta"><span class="pill ' + ph(j.status) + '">' + esc(shortStatus(j.status)) + '</span>' +
+        (j.customer ? esc(j.customer) : '') + (j.phone ? ' ' + esc(j.phone) : '') + ' เปิด ' + esc(fmtDate(j.opened)) +
+        (j.merged ? ' · รวมเข้า ' + esc(j.merged) : '') + '</div>' + j.hits.map(hitHtml).join('') + '</a>';
+    });
+    if (out.loose.length) html += '<div class="muted small" style="margin-top:12px">ในแชทที่ยังไม่อยู่ในงาน</div><div class="panel-box">' + out.loose.map(hitHtml).join('') + '</div>';
+    state.searchHtml = html;
+    document.getElementById('sres').innerHTML = html;
+  }
+
+  // ----- ฟอร์มเปิดงาน -----
+  function renderNew() {
+    setTab('new');
+    const v = intake;
+    const opt = (list, cur) => '<option value=""></option>' + list.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+    $app.innerHTML = '<form id="nf" class="intake" autocomplete="off">' +
+      '<div class="field"><span class="lbl">รูป / คลิป <b class="req">*</b></span><div class="files" id="files"></div>' +
+      '<label class="btn"><input type="file" id="fpick" accept="image/*,video/*" multiple hidden>＋ ถ่าย / เลือกรูป คลิป</label></div>' +
+      '<label class="field"><span class="lbl">อาการ / สิ่งที่ลูกค้าแจ้ง <b class="req">*</b></span><textarea name="symptom" rows="3" required>' + esc(v.symptom || '') + '</textarea></label>' +
+      '<label class="field"><span class="lbl">เบอร์ลูกค้า <b class="req">*</b></span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '" required></label>' +
+      '<div id="dup"></div>' +
+      '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
+      '<label class="field"><span class="lbl">สินค้า / รุ่น</span><input name="product" list="plist" value="' + esc(v.product || '') + '"><datalist id="plist">' +
+        PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>' +
+      '<label class="field"><span class="lbl">SN / เลขเครื่อง</span><input name="serial" value="' + esc(v.serial || '') + '"></label>' +
+      '<label class="field"><span class="lbl">ที่อยู่</span><textarea name="address" rows="2">' + esc(v.address || '') + '</textarea></label>' +
+      '<label class="field"><span class="lbl">จังหวัด</span><select name="province">' + opt(PROVINCES, v.province) + '</select></label>' +
+      '<div class="field"><span class="lbl">ตำแหน่ง</span><div class="search-row"><button type="button" class="btn" id="geo">📍 ตำแหน่งปัจจุบัน</button>' +
+        '<input name="mapUrl" placeholder="หรือวางลิงก์ Google Maps" value="' + esc(v.mapUrl || '') + '"></div><div class="muted small" id="geo-out">' +
+        (v.lat ? 'ปักหมุดแล้ว ' + v.lat.toFixed(5) + ', ' + v.lng.toFixed(5) : '') + '</div></div>' +
+      '<label class="check"><input type="checkbox" name="atShop"' + (v.atShop ? ' checked' : '') + '> เครื่องอยู่ที่ศูนย์ (พิมพ์ป้าย QR)</label>' +
+      '<label class="check"><input type="checkbox" name="sendCard"' + (v.sendCard === false ? '' : ' checked') + '> ส่งการ์ดงานเข้ากลุ่มช่าง</label>' +
+      '<div id="attach-note"></div><button class="btn primary wide" id="nsubmit">เปิดงาน</button></form>';
+    const form = document.getElementById('nf');
+    const keep = () => { const fd = new FormData(form); ['symptom', 'phone', 'customer', 'product', 'serial', 'address', 'province', 'mapUrl'].forEach(k => { intake[k] = fd.get(k); });
+      intake.atShop = form.atShop.checked; intake.sendCard = form.sendCard.checked; };
+    form.oninput = keep;
+    drawFiles();
+    drawAttach();
+    document.getElementById('fpick').onchange = e => { [...e.target.files].forEach(addFile); e.target.value = ''; };
+    document.getElementById('geo').onclick = () => {
+      const out = document.getElementById('geo-out');
+      if (!navigator.geolocation) return toast('เครื่องนี้หาตำแหน่งไม่ได้');
+      out.textContent = 'กำลังหาตำแหน่ง…';
+      navigator.geolocation.getCurrentPosition(p => {
+        intake.lat = p.coords.latitude; intake.lng = p.coords.longitude;
+        out.textContent = 'ปักหมุดแล้ว ' + intake.lat.toFixed(5) + ', ' + intake.lng.toFixed(5) + ' (±' + Math.round(p.coords.accuracy) + ' ม.)';
+      }, () => { out.textContent = 'หาตำแหน่งไม่ได้ (ต้องอนุญาตตำแหน่งให้ LINE)'; }, { enableHighAccuracy: true, timeout: 15000 });
+    };
+    form.phone.onblur = checkPhone;
+    form.onsubmit = submitJob;
+  }
+
+  function addFile(file) {
+    const item = { name: file.name, type: file.type.startsWith('video') ? 'video' : 'image', url: URL.createObjectURL(file), state: 'กำลังส่ง' };
+    intake.files.push(item);
+    drawFiles();
+    uploadFile(file).then(key => { item.key = key; item.state = ''; }).catch(err => { item.state = 'ส่งไม่สำเร็จ'; item.error = err.message; toast(err.message); })
+      .then(drawFiles);
+  }
+
+  function drawFiles() {
+    const el = document.getElementById('files');
+    if (!el) return;
+    el.innerHTML = intake.files.map((f, i) => '<div class="file">' + (f.type === 'image' ? '<img src="' + f.url + '" alt="">' : '<div class="vid">🎬</div>') +
+      (f.state ? '<span class="fstate' + (f.error ? ' bad' : '') + '">' + esc(f.state) + '</span>' : '') +
+      '<button type="button" class="fdel" data-i="' + i + '" aria-label="ลบ">✕</button></div>').join('');
+    el.querySelectorAll('.fdel').forEach(b => b.onclick = () => { intake.files.splice(Number(b.dataset.i), 1); drawFiles(); });
+  }
+
+  async function checkPhone() {
+    const form = document.getElementById('nf');
+    const d = String(form.phone.value).replace(/\D/g, '');
+    const box = document.getElementById('dup');
+    if (d.length < 9) { box.innerHTML = ''; return; }
+    try {
+      const out = await core('lookupPhone', { phone: d });
+      const c = out.customer;
+      if (c) { // เติมข้อมูลลูกค้าเดิมเฉพาะช่องที่ยังว่าง
+        [['customer', c.customer], ['address', c.address], ['province', c.province], ['mapUrl', c.map_url]].forEach(([k, val]) => {
+          if (val && !form[k].value) { form[k].value = val; intake[k] = val; } });
+        if (c.lat && !intake.lat) { intake.lat = c.lat; intake.lng = c.lng; }
+      }
+      const open = out.jobs.filter(j => !/^(ปิด|ยกเลิก|รวมกับงานอื่น)$/.test(j.status));
+      if (!out.jobs.length) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="panel-box"><b>เบอร์นี้มีงานแล้ว ' + out.jobs.length + ' งาน</b>' + (open.length ? ' (ยังไม่ปิด ' + open.length + ')' : '') +
+        out.jobs.slice(0, 5).map(j => '<div class="dup-row"><a href="#job/' + noDigits(j.merged || j.no) + '">' + esc(j.no) + ' ' + esc(j.title) + '</a> <span class="pill ' + ph(j.status) + '">' +
+          esc(shortStatus(j.status)) + '</span>' + (/^(ปิด|ยกเลิก|รวมกับงานอื่น)$/.test(j.status) ? '' : ' <button type="button" class="link-btn" data-attach="' + esc(j.merged || j.no) + '">เพิ่มเข้างานนี้</button>') + '</div>').join('') +
+        '<div class="muted small">ถ้าเป็นเครื่อง/อาการใหม่ เปิดงานใหม่ได้ตามปกติ</div></div>';
+      box.querySelectorAll('[data-attach]').forEach(b => b.onclick = () => { intake.attachTo = b.dataset.attach; drawAttach(); });
+    } catch (err) { /* ไม่ขวางการกรอก */ }
+  }
+
+  function drawAttach() {
+    const el = document.getElementById('attach-note');
+    const btn = document.getElementById('nsubmit');
+    if (!el) return;
+    el.innerHTML = intake.attachTo ? '<div class="panel-box">จะเพิ่มข้อมูลนี้เข้างาน <b>' + esc(intake.attachTo) + '</b> (ไม่เปิดงานใหม่) <button type="button" class="link-btn" id="unattach">ยกเลิก</button></div>' : '';
+    btn.textContent = intake.attachTo ? 'เพิ่มเข้างาน ' + intake.attachTo : 'เปิดงาน';
+    const u = document.getElementById('unattach');
+    if (u) u.onclick = () => { intake.attachTo = ''; drawAttach(); };
+  }
+
+  async function submitJob(e) {
+    e.preventDefault();
+    const form = e.target;
+    if (!intake.files.length) return toast('ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์');
+    if (intake.files.some(f => f.state === 'กำลังส่ง')) return toast('รอส่งรูป/คลิปให้เสร็จก่อน');
+    if (String(form.phone.value).replace(/\D/g, '').length < 9) return toast(CORE_ERRORS.bad_phone);
+    const btn = document.getElementById('nsubmit');
+    busy(btn);
+    try {
+      const fd = new FormData(form);
+      const job = { symptom: fd.get('symptom'), phone: fd.get('phone'), customer: fd.get('customer'), product: fd.get('product'), serial: fd.get('serial'),
+        address: fd.get('address'), province: fd.get('province'), mapUrl: fd.get('mapUrl'), lat: intake.lat, lng: intake.lng,
+        atShop: form.atShop.checked, sendCard: form.sendCard.checked, attachTo: intake.attachTo, files: intake.files.filter(f => f.key).map(f => f.key) };
+      const out = await core('createJob', { job });
+      const done = { no: out.no, url: out.url, card: out.card, print: out.print, attached: !!intake.attachTo,
+        label: { no: out.no, model: job.product, symptom: job.symptom, customer: job.customer } };
+      intake.files.forEach(f => URL.revokeObjectURL(f.url));
+      Object.keys(intake).forEach(k => delete intake[k]);
+      intake.files = []; intake.attachTo = '';
+      state.board = null; // บอร์ดโหลดใหม่ให้เห็นงานนี้
+      drawCreated(done);
+    } catch (err) {
+      if (err.message !== 'login') toast(err.message);
+    } finally { unbusy(); }
+  }
+
+  /** ป้าย 50×30 มม. (567×354 จุด ที่ 300 dpi) วาดในเครื่อง — พิมพ์จากแอป NIIMBOT ได้ */
+  function labelCanvas(l, url) {
+    const c = document.createElement('canvas');
+    c.width = 567; c.height = 354;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#000';
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    const n = qr.getModuleCount(), cell = Math.floor(250 / n), off = 8 + Math.floor((250 - cell * n) / 2);
+    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect(off + k * cell, 14 + r * cell, cell, cell);
+    const x = 270, fit = (t, w) => { t = String(t || ''); while (t && g.measureText(t).width > w) t = t.slice(0, -2) + '…'; return t; };
+    const now = new Date();
+    g.font = '700 60px "Noto Sans Thai", sans-serif'; g.fillText(l.no, x, 62);
+    g.font = '23px "Noto Sans Thai", sans-serif'; g.fillText(fmtDate(now.toISOString()) + ' ' + now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'), x, 100);
+    g.font = '700 27px "Noto Sans Thai", sans-serif'; g.fillText(fit(l.model, 290), x, 148);
+    g.font = '24px "Noto Sans Thai", sans-serif';
+    const sym = String(l.symptom || ''); let cut = sym.length;
+    while (cut > 0 && g.measureText(sym.slice(0, cut)).width > 290) cut--;
+    g.fillText(sym.slice(0, cut), x, 188); g.fillText(fit(sym.slice(cut).trim(), 290), x, 222);
+    g.fillText(fit(l.customer, 290), x, 268);
+    g.font = '22px "Noto Sans Thai", sans-serif'; g.textAlign = 'center'; g.fillText('สแกนดูงาน/เพิ่มรูป', 133, 300);
+    return c;
+  }
+
+  function drawCreated(d) {
+    $app.innerHTML = '<div class="panel-box created"><div class="big-no">' + esc(d.no) + '</div><div>' + (d.attached ? 'เพิ่มข้อมูลเข้างานแล้ว' : 'เปิดงานแล้ว') +
+      (d.card ? ' · ส่งการ์ดเข้ากลุ่มแล้ว' : '') + (d.print ? ' · เข้าคิวพิมพ์ป้าย' : '') + '</div>' +
+      '<div id="label-box"></div><div class="actions"><a class="btn primary" href="#job/' + noDigits(d.no) + '">เปิดหน้างาน</a>' +
+      '<button class="btn" id="dl-label">ดาวน์โหลดป้าย QR</button><a class="btn" href="#new">เปิดงานอื่น</a></div>' +
+      '<div class="muted small">ดาวน์โหลดป้ายแล้วเปิดในแอป NIIMBOT เพื่อพิมพ์ (ฉลาก 50×30 มม.) · ถ้ากดดาวน์โหลดไม่ได้ ให้กดค้างที่รูปแล้วบันทึก</div></div>';
+    if (typeof qrcode !== 'function') return;
+    const c = labelCanvas(d.label, d.url);
+    const img = new Image(); img.src = c.toDataURL('image/png'); img.className = 'label-img'; img.alt = 'ป้าย ' + d.no;
+    document.getElementById('label-box').appendChild(img);
+    document.getElementById('dl-label').onclick = () => { const a = document.createElement('a'); a.href = img.src; a.download = 'label-' + noDigits(d.no) + '.png'; a.click(); };
+  }
+
   // ---------- เส้นทาง ----------
   async function route() {
     closeSheet();
@@ -968,6 +1267,8 @@
       if (m) await renderJob(m[1]);
       else if (hash === '#review') await renderReview();
       else if (hash === '#stats') await renderStats();
+      else if (hash === '#new') renderNew();
+      else if (hash === '#search') await renderSearch();
       else await renderBoard();
       window.scrollTo(0, 0);
     } catch (err) {
@@ -984,8 +1285,9 @@
       // ยกเว้นลิงก์ "เปิดหน้างาน" จากการ์ดในแชท (?job=0131) หรือ ?view=review
       const params = new URLSearchParams(location.search);
       const start = params.get('job') ? '#job/' + params.get('job').replace(/\D/g, '')
-        : params.get('view') === 'review' ? '#review' : '#board';
-      if (location.hash !== start) history.replaceState(null, '', location.pathname + location.search + start);
+        : params.get('view') === 'review' ? '#review' : params.get('view') === 'new' ? '#new' : params.get('view') === 'search' ? '#search' : '#board';
+      // ลบ ?job= ออกจาก URL หลังใช้แล้ว: รีเฟรช / LINE เปิดหน้าต่างเดิมซ้ำ จะไม่ค้างที่งานเดิม (กดย้อนกลับไปบอร์ดได้ตามปกติ)
+      history.replaceState(null, '', location.pathname + start);
       window.addEventListener('hashchange', route);
       route();
       api('me').then(me => {
