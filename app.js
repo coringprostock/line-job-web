@@ -216,7 +216,8 @@
 
   function viewToggle() {
     const seg = (v, label) => '<button class="seg' + (state.boardView === v ? ' on' : '') + '" data-view="' + v + '">' + label + '</button>';
-    return '<div class="view-toggle"><div class="segs">' + seg('list', 'รายการ') + seg('dash', 'ภาพรวม') + '</div></div><div style="height:10px"></div>';
+    return '<div class="view-toggle"><div class="segs">' + seg('list', 'รายการ') + seg('dash', 'ภาพรวม') + '</div>' +
+      '<a class="btn primary new-job-btn" href="#new">＋ เปิดงาน</a></div><div style="height:10px"></div>';
   }
   function bindViewToggle() {
     $app.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
@@ -1103,7 +1104,7 @@
 
   // ----- ฟอร์มเปิดงาน -----
   function renderNew() {
-    setTab('new');
+    setTab('board');
     const v = intake;
     const opt = (list, cur) => '<option value=""></option>' + list.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
     $app.innerHTML = '<form id="nf" class="intake" autocomplete="off">' +

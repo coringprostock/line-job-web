@@ -291,3 +291,4 @@ details.table td:first-child, details.table th:first-child { text-align: left; }
 .created .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 12px 0; }
 .label-img { width: 100%; max-width: 340px; border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; background: #fff; }
 label.btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.new-job-btn { text-decoration: none; white-space: nowrap; padding: 6px 14px; }
