@@ -30,7 +30,8 @@
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
     already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
     unknown_action: 'ระบบยังไม่รองรับคำสั่งนี้ (อาจยังไม่ได้ deploy)', nothing_selected: 'ยังไม่ได้เลือกข้อ', not_in_job: 'ข้อความนี้ไม่ได้อยู่ในงานนี้แล้ว (มีคนย้ายไปก่อน) โหลดหน้าใหม่',
-    same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
+    same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน',
+    need_fix_note: 'ปิดงานต้องใส่สรุปการแก้ไข (อย่างน้อย 10 ตัวอักษร)', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
   };
 
   const READ_ACTIONS = ['me', 'board', 'job', 'thumb', 'review'];
@@ -392,7 +393,7 @@
   }
 
   function eventHtml(ev) {
-    const kindClass = ev.kind === 'เปลี่ยนสถานะ' ? 'k-status' : ev.kind === 'เปิดงาน' ? 'k-open' : '';
+    const kindClass = ev.kind === 'เปลี่ยนสถานะ' ? 'k-status' : ev.kind === 'เปิดงาน' ? 'k-open' : ev.kind === 'สรุปการแก้ไข' ? 'k-fix' : '';
     let body = '';
     if (ev.msg) {
       body += '<div class="what">' + esc(ev.msg.sender) + '</div>';
@@ -448,7 +449,7 @@
     });
     bar.querySelector('#mv-new').onclick = () => sheet('<h2>แยก ' + n + ' ข้อความ/รูป เป็นงานใหม่</h2>' +
       '<label class="field">ชื่องาน (ลูกค้า + เครื่อง/อาการ)<input id="f-title" maxlength="120"></label>' +
-      '<label class="field">สถานะ<select id="f-status">' + statusOptions(state.jobData.statuses, 'รับแจ้ง') + '</select></label>' +
+      '<label class="field">สถานะ<select id="f-status">' + statusOptions(state.jobData.statuses, 'รับแจ้ง', false, true) + '</select></label>' +
       '<div class="actions"><button class="btn primary" id="f-ok">เปิดงานใหม่</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = e => {
         const title = el.querySelector('#f-title').value.trim();
@@ -526,7 +527,7 @@
       }
       if (changes.follow) local.job.follow = changes.follow;
       if (changes.title) local.job.title = changes.title;
-      if (changes.note) local.events.push({ time: now, by: me, kind: 'โน้ต', detail: changes.note + ' (กำลังบันทึก…)' });
+      if (changes.note) local.events.push({ time: now, by: me, kind: changes.status === 'ปิด' ? 'สรุปการแก้ไข' : 'โน้ต', detail: changes.note + ' (กำลังบันทึก…)' });
       closeSheet();
       drawJob(local);
       state.jobData = before; // ข้อมูลจริงยังเป็นของเดิมจนกว่าระบบตอบ
@@ -543,17 +544,46 @@
     }
   }
 
+  // ปิดงานต้องมีสรุปการแก้ไข (Apps Script บังคับอีกชั้น) · พิมพ์ หรือกดไมค์บนคีย์บอร์ดมือถือพูดแทนพิมพ์
+  const FIX_NOTE_MIN = 10;
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function fixNoteField() {
+    return '<label class="field"><span class="lbl">สรุปการแก้ไข <b class="req">*</b></span>' +
+      '<textarea id="f-note" rows="4" maxlength="1000" placeholder="ทำอะไรไปบ้าง เช่น เปลี่ยนซีลปั๊มไฮดรอลิก เติมน้ำมัน ทดสอบยก 10 นาทีไม่รั่ว"></textarea></label>' +
+      (Speech ? '<button type="button" class="btn" id="mic">🎤 กดแล้วพูด</button>' : '') +
+      '<p class="muted small">พูดแทนพิมพ์ได้: แตะช่องข้างบน แล้วกดรูปไมค์ 🎤 บนคีย์บอร์ดมือถือ</p>';
+  }
+  function wireMic(el) {
+    const btn = el.querySelector('#mic');
+    if (!btn) return;
+    let rec = null;
+    btn.onclick = () => {
+      if (rec) { rec.stop(); return; }
+      rec = new Speech();
+      rec.lang = 'th-TH'; rec.interimResults = false; rec.continuous = true;
+      const box = el.querySelector('#f-note');
+      rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) box.value = (box.value + ' ' + e.results[i][0].transcript).trim(); };
+      rec.onerror = () => toast('ใช้ไมค์ในหน้านี้ไม่ได้ ใช้ไมค์บนคีย์บอร์ดแทน');
+      rec.onend = () => { rec = null; btn.textContent = '🎤 กดแล้วพูด'; };
+      try { rec.start(); btn.textContent = '⏹ หยุดฟัง'; } catch (err) { rec = null; toast('ใช้ไมค์ในหน้านี้ไม่ได้ ใช้ไมค์บนคีย์บอร์ดแทน'); }
+    };
+  }
+
   function statusSheet(data, status) {
     const waiting = data.waitingCustomer.indexOf(status) >= 0;
+    const closing = status === 'ปิด' && data.job.status !== 'ปิด';
     const html = '<h2>เปลี่ยนเป็น “' + esc(status) + '”</h2>' +
       '<p class="muted small">' + esc(data.job.no) + ' ' + esc(data.job.title) + ' · ตอนนี้: ' + esc(data.job.status) + '</p>' +
       (status === 'ปิด' || status === 'ยกเลิก' ? '' :
         '<label class="field">วันที่ต้องตามต่อ' + (waiting ? ' (รอลูกค้า ต้องมีวันตาม)' : ' (ไม่บังคับ)') +
         '<input type="date" id="f-date" min="' + todayKey() + '" value="' + (waiting ? nextBusinessKey() : '') + '"></label>') +
-      '<label class="field">โน้ต (ไม่บังคับ)<textarea id="f-note" rows="2"></textarea></label>' +
-      '<div class="actions"><button class="btn primary" id="f-ok">บันทึก</button><button class="btn" data-close>ยกเลิก</button></div>';
+      (closing ? fixNoteField() : '<label class="field">โน้ต (ไม่บังคับ)<textarea id="f-note" rows="2"></textarea></label>') +
+      '<div class="actions"><button class="btn primary" id="f-ok">' + (closing ? 'ปิดงาน' : 'บันทึก') + '</button><button class="btn" data-close>ยกเลิก</button></div>';
     sheet(html, el => {
+      if (closing) wireMic(el);
       el.querySelector('#f-ok').onclick = async e => {
+        const fix = el.querySelector('#f-note').value.trim();
+        if (closing && fix.length < FIX_NOTE_MIN) { toast('ใส่สรุปการแก้ไขก่อนปิดงาน (อย่างน้อย ' + FIX_NOTE_MIN + ' ตัวอักษร)'); el.querySelector('#f-note').focus(); return; }
         busy(e.target);
         const date = el.querySelector('#f-date');
         await save(data.job.no, { status, follow: date ? date.value : '', note: el.querySelector('#f-note').value.trim() },
@@ -809,9 +839,11 @@
     }
   }
 
-  const statusOptions = (statuses, selected, withKeep) =>
+  // noClose = ย้ายข้อความในหน้างานตั้งเป็นปิดไม่ได้ (ปิดจากหน้างานต้องมีสรุป) · คิวตรวจปิดได้ ไม่บังคับสรุป
+  const statusOptions = (statuses, selected, withKeep, noClose) => (statuses = statuses.filter(s => !noClose || s !== 'ปิด'),
     (withKeep ? '<option value="">ไม่เปลี่ยนสถานะ</option>' : '') +
-    statuses.map(s => '<option' + (s === selected ? ' selected' : '') + '>' + esc(s) + '</option>').join('');
+    statuses.map(s => '<option' + (s === selected ? ' selected' : '') + '>' + esc(s) + '</option>').join(''));
+  const reviewNoteField = '<label class="field">โน้ต (ไม่บังคับ) เช่น แก้อะไรไป / ลูกค้ารับเครื่องแล้ว<textarea id="f-note" rows="2" maxlength="1000"></textarea></label>';
 
   function newSheet(items, statuses) {
     const first = items[0];
@@ -819,10 +851,10 @@
     sheet('<h2>' + (many ? 'รวม ' + items.length + ' ข้อเป็นงานใหม่ 1 งาน' : 'เปิดงานใหม่') + '</h2>' +
       '<label class="field">ชื่องาน<input id="f-title" maxlength="120" value="' + esc(first.title || '') +
       '"></label><label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, first.status || 'รับแจ้ง') +
-      '</select></label><div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      '</select></label>' + reviewNoteField + '<div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = e => {
         busy(e.target);
-        const choice = { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value };
+        const choice = { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim() };
         if (many) decideMany(choice); else decide(first, choice, null);
       };
     });
@@ -839,7 +871,7 @@
       (opts.length ? '<select id="f-pick">' + opts.map(o => '<option value="' + esc(o.no) + '">' + esc(o.label) + '</option>').join('') +
         '<option value="">พิมพ์เลขงานเอง…</option></select>' : '') +
       '<input id="f-job" inputmode="numeric" placeholder="เช่น 131"' + (opts.length ? ' hidden' : '') + '></label>' +
-      '<label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, many ? '' : items[0].status, true) + '</select></label>' +
+      '<label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, many ? '' : items[0].status, true) + '</select></label>' + reviewNoteField +
       '<div class="actions"><button class="btn primary" id="f-ok">แนบ</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       const pick = el.querySelector('#f-pick');
       const input = el.querySelector('#f-job');
@@ -848,7 +880,7 @@
         const job = (pick && pick.value) || input.value.trim();
         if (!job) { toast('ใส่เลขงานก่อน'); return; }
         busy(e.target);
-        const choice = { decision: 'attach', job, status: el.querySelector('#f-status').value };
+        const choice = { decision: 'attach', job, status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim() };
         if (many) decideMany(choice); else decide(items[0], choice, null);
       };
     });
@@ -1029,7 +1061,8 @@
   const CORE_ERRORS = {
     bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
     bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
-    core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน'
+    core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
+    no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")'
   };
   const intake = { files: [], attachTo: '' };   // ฟอร์มที่กรอกค้างไว้ (สลับแท็บแล้วกลับมาได้)
 
@@ -1148,7 +1181,12 @@
       '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
       '<label class="field"><span class="lbl">สินค้า / รุ่น</span><input name="product" list="plist" value="' + esc(v.product || '') + '"><datalist id="plist">' +
         PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>' +
-      '<label class="field"><span class="lbl">SN / เลขเครื่อง</span><input name="serial" value="' + esc(v.serial || '') + '"></label>' +
+      '<div class="field"><span class="lbl">SN / เลขเครื่อง <b class="req">*</b></span>' +
+        '<input name="serial" value="' + esc(v.serial || '') + '">' +
+        '<label class="btn"><input type="file" id="plate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่อง / เนมเพลท ให้ AI อ่าน SN</label>' +
+        '<div class="muted small" id="plate-out"></div>' +
+        '<select name="plateState">' + [['', 'ป้ายอ่านได้ครบ'], ['damaged', 'ป้ายชำรุด / เลขเลือน ขาดบางตัว'], ['none', 'เครื่องไม่มีป้าย / ป้ายหาย']]
+          .map(o => '<option value="' + o[0] + '"' + (o[0] === (v.plateState || '') ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></div>' +
       '<label class="field"><span class="lbl">ที่อยู่</span><textarea name="address" rows="2">' + esc(v.address || '') + '</textarea></label>' +
       '<label class="field"><span class="lbl">จังหวัด</span><select name="province">' + opt(PROVINCES, v.province) + '</select></label>' +
       '<div class="field"><span class="lbl">ตำแหน่ง</span><div class="search-row"><button type="button" class="btn" id="geo">📍 ตำแหน่งปัจจุบัน</button>' +
@@ -1159,8 +1197,11 @@
       '<div id="attach-note"></div><button class="btn primary wide" id="nsubmit">เปิดงาน</button></form>';
     const form = document.getElementById('nf');
     const keep = () => { const fd = new FormData(form); ['symptom', 'phone', 'customer', 'product', 'serial', 'address', 'province', 'mapUrl'].forEach(k => { intake[k] = fd.get(k); });
-      intake.atShop = form.atShop.checked; intake.sendCard = form.sendCard.checked; };
+      intake.atShop = form.atShop.checked; intake.sendCard = form.sendCard.checked; intake.plateState = form.plateState.value; };
     form.oninput = keep;
+    form.plateState.onchange = () => { keep(); drawPlateState(); };
+    drawPlateState();
+    document.getElementById('plate').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) readPlate(f); };
     drawFiles();
     drawAttach();
     document.getElementById('fpick').onchange = e => { [...e.target.files].forEach(addFile); e.target.value = ''; };
@@ -1175,6 +1216,40 @@
     };
     form.phone.onblur = checkPhone;
     form.onsubmit = submitJob;
+  }
+
+  // ป้ายชำรุด = ใส่เลขส่วนที่อ่านได้ (ถ้ามี) แล้วเปิดงานได้ · ไม่มีป้าย = ไม่ต้องใส่เลข
+  function drawPlateState() {
+    const form = document.getElementById('nf');
+    const st = form.plateState.value;
+    form.serial.disabled = st === 'none';
+    if (st === 'none') form.serial.value = '';
+    form.serial.placeholder = st === 'none' ? 'ไม่มี SN' : st === 'damaged' ? 'ใส่ส่วนที่อ่านได้ (ไม่บังคับ) ตัวที่หายใส่ ?' : 'พิมพ์เลข หรือถ่ายรูปป้ายให้ AI อ่าน';
+  }
+  /** SN ที่ส่งเปิดงาน (Worker ตรวจซ้ำด้วย serialOk) */
+  function serialOf(form) {
+    const sn = String(form.serial.value).trim();
+    const st = form.plateState.value;
+    return st === 'none' ? 'ไม่มี SN' : st === 'damaged' ? ('ป้ายชำรุด ' + sn.replace(/^ป้ายชำรุด\s*/, '')).trim() : sn;
+  }
+
+  /** รูปป้ายเครื่อง → เก็บเป็นรูปของงานด้วย + AI อ่าน SN/รุ่นมาเติม (ช่างแก้ได้ก่อนกดเปิดงาน) */
+  async function readPlate(file) {
+    addFile(file);
+    const out = document.getElementById('plate-out');
+    out.textContent = 'AI กำลังอ่านป้าย…';
+    try {
+      const r = await core('readPlate', { image: await toDataUrl(await shrink(file, 1600)), mime: 'image/jpeg' });
+      const form = document.getElementById('nf');
+      if (!form) return;
+      if (!r.serial && !r.damaged) { out.textContent = '⚠️ AI ไม่เห็นป้ายเครื่องในรูปนี้ ถ่ายป้ายให้ชัดขึ้น หรือพิมพ์เอง'; return; }
+      form.plateState.value = r.damaged ? 'damaged' : ''; intake.plateState = form.plateState.value; drawPlateState();
+      form.serial.value = r.serial; intake.serial = r.serial;
+      const model = r.product && r.model && !r.product.includes(r.model) ? r.product + ' ' + r.model : r.product || r.model;
+      if (!form.product.value && model) { form.product.value = model; intake.product = model; }
+      out.textContent = r.damaged ? '🏷️ AI: ป้ายชำรุด / เลขเลือน' + (r.serial ? ' อ่านได้บางส่วน ' + r.serial : ' อ่านเลขไม่ได้') + ' — เปิดงานได้ (ถ้าอ่านเองได้ แก้เลขแล้วเลือก "ป้ายอ่านได้ครบ")'
+        : '✅ AI อ่านได้ ' + r.serial + (r.model ? ' · รุ่น ' + r.model : '') + ' — ตรวจว่าตรงป้าย';
+    } catch (err) { if (err.message !== 'login') out.textContent = '⚠️ ' + err.message; }
   }
 
   function addFile(file) {
@@ -1233,11 +1308,14 @@
     if (!intake.files.length) return toast('ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์');
     if (intake.files.some(f => f.state === 'กำลังส่ง')) return toast('รอส่งรูป/คลิปให้เสร็จก่อน');
     if (String(form.phone.value).replace(/\D/g, '').length < 9) return toast(CORE_ERRORS.bad_phone);
+    const serial = serialOf(form);
+    if (!intake.attachTo && (!serial || (serial.includes('?') && !serial.startsWith('ป้ายชำรุด')))) {
+      form.serial.focus(); return toast(serial ? 'SN มีตัวที่อ่านไม่ชัด (?) แก้ให้ถูก หรือเลือก "ป้ายชำรุด"' : CORE_ERRORS.no_serial); }
     const btn = document.getElementById('nsubmit');
     busy(btn);
     try {
       const fd = new FormData(form);
-      const job = { symptom: fd.get('symptom'), phone: fd.get('phone'), customer: fd.get('customer'), product: fd.get('product'), serial: fd.get('serial'),
+      const job = { symptom: fd.get('symptom'), phone: fd.get('phone'), customer: fd.get('customer'), product: fd.get('product'), serial,
         address: fd.get('address'), province: fd.get('province'), mapUrl: fd.get('mapUrl'), lat: intake.lat, lng: intake.lng,
         atShop: form.atShop.checked, sendCard: form.sendCard.checked, attachTo: intake.attachTo, files: intake.files.filter(f => f.key).map(f => f.key) };
       const out = await core('createJob', { job });

@@ -140,6 +140,8 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
 }
 .timeline li.k-status::before { background: var(--accent); }
 .timeline li.k-open::before { background: var(--done); }
+.timeline li.k-fix::before { background: var(--done); }
+.timeline li.k-fix .text { font-weight: 600; }
 .timeline .when { color: var(--muted); font-size: 12px; }
 .timeline .what { font-weight: 600; }
 .timeline .text { white-space: pre-wrap; word-break: break-word; }
