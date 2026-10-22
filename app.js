@@ -665,12 +665,16 @@
   function chatHtml(it) {
     const done = !!(it.inJob || it.human);
     let badge;
-    if (it.inJob) badge = '<span class="tag tag-job">📂 ' + esc(it.inJobLabel) + '</span>';
+    const aiDid = it.inJob && /^AI/.test(it.inJobBy || '');
+    // AI แนบเอง (รูป/เบอร์/SN ตรงกัน): กดไปหน้างานเพื่อตรวจ ผิดก็ย้ายออกที่นั่น
+    if (aiDid) badge = '<a class="tag tag-job tag-aidid" href="#job/' + esc(String(it.inJob).replace(/\D/g, '')) + '">🤖 AI แนบเข้า ' +
+      esc(it.inJobLabel) + ' (' + esc(it.inJobBy.replace(/^AI\s*\(?|\)$/g, '') || 'อัตโนมัติ') + ')</a>';
+    else if (it.inJob) badge = '<span class="tag tag-job">📂 ' + esc(it.inJobLabel) + '</span>';
     else if (it.human) badge = '<span class="tag">ตัดสินแล้ว: ' + esc(it.human) + '</span>';
     else if (/กติกา: ข้าม/.test(it.source)) badge = '<span class="tag tag-skip">ข้าม (คำตอบรับ)</span>';
     else badge = '<span class="tag tag-ai">AI: ' + esc(it.action) + (it.jobLabel ? ' → ' + esc(it.jobLabel) : '') + ' · ' + it.conf + '%</span>';
     const on = state.selected.has(it.row);
-    return '<div class="rv chat' + (done ? ' done' : '') + (on ? ' picked' : '') + '"><label class="pick">' +
+    return '<div class="rv chat' + (done && !aiDid ? ' done' : '') + (on ? ' picked' : '') + '"><label class="pick">' +
       (done ? '' : '<input type="checkbox" data-pick="' + it.row + '"' + (on ? ' checked' : '') + '>') +
       '<span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
       '<div class="text">' + esc(it.text) + '</div>' + badge + (it.reason && !done ? '<div class="muted small">' + esc(it.reason) + '</div>' : '') + '</div>';
