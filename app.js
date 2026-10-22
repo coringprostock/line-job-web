@@ -75,7 +75,21 @@
   }
 
   const API_TIMEOUT_MS = 45000;
+  // บอร์ด/หน้างานอ่านจาก D1 (Cloudflare) เร็วกว่าชีตหลายเท่า · ล้มเหลว/ยังไม่ซิงก์ค่อยถาม Apps Script
+  const D1_ACTIONS = ['board', 'job'];
+  // บันทึกยังเขียนผ่าน Apps Script (ชีตเป็นตัวหลัก) แล้วสั่งซิงก์ให้ D1 ตามทันที
+  const WRITE_ACTIONS = ['update', 'moveMsgs', 'newJob', 'decide', 'decideMany'];
   async function api(action, data, attempt = 1) {
+    if (attempt === 1 && CFG.CORE_URL && D1_ACTIONS.indexOf(action) >= 0) {
+      try {
+        if (data && data.fresh) state.syncing = state.syncing || syncD1();
+        if (state.syncing) await state.syncing;
+        return await core(action, data, 15000);
+      } catch (err) {
+        if (err.message === 'login') throw err;
+        console.warn(action, 'อ่านจาก D1 ไม่ได้ ใช้ Apps Script แทน:', err.message);
+      }
+    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
     let out;
@@ -100,7 +114,12 @@
       throw new Error('login');
     }
     if (out.error) throw new Error(ERRORS[out.error] || out.error);
+    if (CFG.CORE_URL && WRITE_ACTIONS.indexOf(action) >= 0) state.syncing = syncD1();
     return out;
+  }
+  function syncD1() {
+    const p = core('sync', {}, 30000).catch(() => {}).then(() => { if (state.syncing === p) state.syncing = null; });
+    return p;
   }
 
   function showError(err) {
@@ -139,7 +158,7 @@
     const fresh = await api('board', state.forceFresh ? { fresh: true } : {});
     state.forceFresh = false;
     state.board = fresh;
-    setBadge(fresh.reviewCount);
+    if (fresh.reviewCount !== undefined) setBadge(fresh.reviewCount); // D1 ไม่มีจำนวนคิว (มาจาก me แทน)
     if (location.hash === '' || location.hash === '#board') drawBoard();
   }
 
@@ -1010,10 +1029,19 @@
   };
   const intake = { files: [], attachTo: '' };   // ฟอร์มที่กรอกค้างไว้ (สลับแท็บแล้วกลับมาได้)
 
-  async function core(action, data) {
+  async function core(action, data, timeoutMs) {
     if (!CFG.CORE_URL) throw new Error('ยังไม่ได้ตั้ง CORE_URL ใน config.js');
-    const res = await fetch(CFG.CORE_URL + '/api', { method: 'POST', body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {})) });
-    const out = await res.json().catch(() => ({ error: 'server_error' }));
+    const ctrl = new AbortController();
+    const timer = timeoutMs ? setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+    let out;
+    try {
+      const res = await fetch(CFG.CORE_URL + '/api', { method: 'POST', signal: ctrl.signal,
+        body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {})) });
+      out = await res.json().catch(() => ({ error: 'server_error' }));
+    } catch (err) {
+      throw new Error('เชื่อมต่อไม่สำเร็จ (เน็ตหลุดหรือระบบตอบช้า) ลองใหม่อีกครั้ง');
+    } finally { clearTimeout(timer); }
+    if (out.ms) console.log('core', action, out.ms + ' ms');
     if (out.error === 'login_expired' || out.error === 'login_required') { liff.login({ redirectUri: location.href }); throw new Error('login'); }
     if (out.error) throw new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error);
     return out;
