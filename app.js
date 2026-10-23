@@ -863,17 +863,13 @@
     bar.querySelector('#bk-attach').onclick = () => attachSheet(items, statuses);
   }
 
-  async function decideMany(choice) {
-    const items = selectedItems().map(it => ({ row: it.row, msgId: it.msgId }));
-    try {
-      const out = await api('decideMany', Object.assign({ items }, choice));
-      closeSheet();
-      toast('ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' : '') + (out.job ? ' · ' + out.job : '') + ' ✅');
-      renderReview();
-    } catch (err) {
-      if (err.message !== 'login') toast('⚠️ ' + err.message);
-      unbusy();
-    }
+  // ติ๊กหลายข้อ: เหมือน decide — ปิดหน้าต่าง เอาข้อออกจากจอทันที แล้วบันทึกเบื้องหลัง
+  function decideMany(choice) {
+    const picked = selectedItems();
+    if (!picked.length) return;
+    const items = picked.map(it => ({ row: it.row, msgId: it.msgId }));
+    queueSave(picked, () => api('decideMany', Object.assign({ items }, choice)),
+      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' : '') + (out.job ? ' · ' + out.job : ''));
   }
 
   // noClose = ย้ายข้อความในหน้างานตั้งเป็นปิดไม่ได้ (ปิดจากหน้างานต้องมีสรุป) · คิวตรวจปิดได้ ไม่บังคับสรุป
@@ -928,22 +924,28 @@
   let saveChain = Promise.resolve(), saving = 0;
   const pendingRows = new Set(); // ข้อที่ส่งบันทึกแล้วแต่ยังไม่เสร็จ: โหลดคิวระหว่างนี้ต้องไม่แสดงซ้ำ
   function decide(it, choice, okMsg) {
+    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => okMsg || out.verdict);
+  }
+
+  /** ปิดหน้าต่าง + เอาข้อออกจากจอทันที → ส่งบันทึกต่อคิว (ทีละคำขอ เรียงตามลำดับที่กด) */
+  function queueSave(list, call, okText) {
     closeSheet();
+    unbusy();
+    const rows = new Set(list.map(it => it.row));
+    rows.forEach(r => { pendingRows.add(r); state.selected && state.selected.delete(r); });
     if (state.review) {
-      state.review.items = state.review.items.filter(x => x !== it);
-      state.selected.delete(it.row);
+      state.review.items = state.review.items.filter(x => !rows.has(x.row));
       setBadge(state.review.items.length);
-      if (location.hash === '#review' && state.reviewMode === 'queue') { const y = window.scrollY; drawReview(); window.scrollTo(0, y); }
     }
+    if (location.hash === '#review') { const y = window.scrollY; if (state.reviewMode === 'chat') drawChat(); else drawReview(); window.scrollTo(0, y); }
     saving++;
-    pendingRows.add(it.row);
     drawSaving();
-    saveChain = saveChain.then(() => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)))
-      .then(out => toast((okMsg || out.verdict) + ' ✅'))
+    saveChain = saveChain.then(call)
+      .then(out => toast(okText(out) + ' ✅'))
       .catch(err => { if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message + ' (ข้อนั้นกลับเข้าคิวแล้ว)'); })
       .then(() => {
         saving--;
-        pendingRows.delete(it.row);
+        rows.forEach(r => pendingRows.delete(r));
         drawSaving();
         if (!saving && location.hash === '#review' && document.getElementById('sheet').hidden) refreshReviewQuietly();
       });
