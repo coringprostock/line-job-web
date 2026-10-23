@@ -147,6 +147,11 @@
     b.hidden = !n;
   }
 
+  // หน้าที่โหลดช้า (เช่น สถิติ) ตอบกลับมาหลังผู้ใช้กดไปแท็บอื่นแล้ว ต้องไม่วาดทับหน้าใหม่
+  // ทุก render เรียก claim() ตอนเริ่ม แล้วเช็ก live() หลัง await ทุกครั้ง
+  let renderSeq = 0;
+  function claim() { const my = ++renderSeq; return () => my === renderSeq; }
+
   function setTab(tab) {
     document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
   }
@@ -154,9 +159,11 @@
   // ---------- บอร์ดงาน ----------
   async function renderBoard() {
     setTab('board');
+    const live = claim();
     if (state.board) drawBoard(); // แสดงของเดิมทันที แล้วโหลดใหม่ตามหลัง
     else $app.innerHTML = '<div class="center muted">กำลังโหลดงาน…</div>';
     const fresh = await api('board', state.forceFresh ? { fresh: true } : {});
+    if (!live()) return;
     state.forceFresh = false;
     state.board = fresh;
     if (fresh.reviewCount !== undefined) setBadge(fresh.reviewCount); // D1 ไม่มีจำนวนคิว (มาจาก me แทน)
@@ -328,8 +335,10 @@
   // ---------- หน้างาน ----------
   async function renderJob(no) {
     setTab('');
+    const live = claim();
     $app.innerHTML = '<div class="center muted">กำลังโหลดงาน…</div>';
-    drawJob(await api('job', { no }));
+    const data = await api('job', { no });
+    if (live()) drawJob(data);
   }
 
   function drawJob(data) {
@@ -625,16 +634,21 @@
   // โหมด: คิวตรวจ (เฉพาะข้อที่ต้องตัดสิน) · ไล่ตามแชท (ทุกก้อนของวัน รวมที่ AI ตัดออก เพื่อหางานที่ AI พลาด)
   async function renderReview() {
     setTab('review');
+    const live = claim();
     state.reviewMode = state.reviewMode || 'queue';
     state.selected = new Set();
     $app.innerHTML = reviewHeader() + '<div class="center muted">กำลังโหลด…</div>';
     bindReviewHeader();
     if (state.reviewMode === 'chat') {
       state.chatDate = state.chatDate || todayKey();
-      state.chat = await api('chat', { date: state.chatDate });
+      const chat = await api('chat', { date: state.chatDate });
+      if (!live()) return;
+      state.chat = chat;
       drawChat();
     } else {
-      state.review = await api('review');
+      const review = await api('review');
+      if (!live()) return;
+      state.review = review;
       setBadge(state.review.items.length);
       drawReview();
     }
@@ -913,12 +927,13 @@
 
   async function renderStats() {
     setTab('stats');
+    const live = claim();
     state.statsRange = state.statsRange || pref('statsRange') || '30';
     const [from, to] = rangeOf(state.statsRange);
     $app.innerHTML = statsHeader(from, to) + '<div class="center muted">กำลังคำนวณสถิติ…</div>';
     bindStatsHeader();
     const st = await api('stats', { from, to });
-    drawStats(st);
+    if (live()) drawStats(st);
   }
 
   function statsHeader(from, to) {
@@ -1115,6 +1130,7 @@
   // ----- ค้นหา -----
   async function renderSearch() {
     setTab('search');
+    claim(); // หน้าค้นหาวาดทันที แต่ต้องยกเลิกหน้าที่ยังโหลดค้างอยู่
     const q = state.searchQ || '';
     $app.innerHTML = '<div class="toolbar"><div class="search-row"><input class="search" id="sq" type="search" enterkeyhint="search" ' +
       'placeholder="ชื่อ เบอร์ รุ่น SN จังหวัด หรือคำในแชท" value="' + esc(q) + '"><button class="btn primary" id="sgo">ค้นหา</button></div>' +
@@ -1164,7 +1180,8 @@
     });
     if (out.loose.length) html += '<div class="muted small" style="margin-top:12px">ในแชทที่ยังไม่อยู่ในงาน</div><div class="panel-box">' + out.loose.map(hitHtml).join('') + '</div>';
     state.searchHtml = html;
-    document.getElementById('sres').innerHTML = html;
+    const box = document.getElementById('sres'); // ผู้ใช้อาจกดไปแท็บอื่นระหว่างรอผลค้น
+    if (box) box.innerHTML = html;
   }
 
   // ----- ฟอร์มเปิดงาน -----
@@ -1378,14 +1395,23 @@
       if (m) await renderJob(m[1]);
       else if (hash === '#review') await renderReview();
       else if (hash === '#stats') await renderStats();
-      else if (hash === '#new') renderNew();
+      else if (hash === '#new') { claim(); renderNew(); }
       else if (hash === '#search') await renderSearch();
       else await renderBoard();
       window.scrollTo(0, 0);
     } catch (err) {
-      showError(err);
+      if ((location.hash || '#board') === hash) showError(err); // error ของหน้าที่ผู้ใช้ออกไปแล้ว ไม่ต้องแสดง
     }
   }
+
+  // body เว้นที่ด้านบนเท่าแถบแท็บจริง (แถบสูงเปลี่ยนได้ตามขนาดตัวอักษร / ขอบจอ)
+  function fitTopbar() {
+    const bar = document.querySelector('.topbar');
+    if (bar) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+  }
+  fitTopbar();
+  window.addEventListener('resize', fitTopbar);
+  if (document.fonts) document.fonts.ready.then(fitTopbar);
 
   async function start() {
     try {
@@ -1400,6 +1426,10 @@
       // ลบ ?job= ออกจาก URL หลังใช้แล้ว: รีเฟรช / LINE เปิดหน้าต่างเดิมซ้ำ จะไม่ค้างที่งานเดิม (กดย้อนกลับไปบอร์ดได้ตามปกติ)
       history.replaceState(null, '', location.pathname + start);
       window.addEventListener('hashchange', route);
+      // กดแท็บที่อยู่แล้ว = โหลดหน้านั้นใหม่ (hash ไม่เปลี่ยน เลยไม่มี hashchange)
+      document.querySelectorAll('.tabs a').forEach(a => a.addEventListener('click', e => {
+        if (a.getAttribute('href') === (location.hash || '#board')) { e.preventDefault(); route(); }
+      }));
       route();
       api('me').then(me => {
         state.me = me;

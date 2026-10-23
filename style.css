@@ -45,9 +45,14 @@ body {
 a { color: inherit; }
 button, input, select, textarea { font: inherit; color: inherit; }
 
+/* แถบแท็บติดบนจอตลอด: ใช้ fixed แทน sticky เพราะ sticky หลุดได้ในเว็บวิวของ LINE บางเครื่อง
+   body เว้นที่ด้านบนเท่าความสูงแถบ (--topbar-h วัดจริงจาก app.js) */
+html { scroll-padding-top: var(--topbar-h, 56px); }
+body { padding-top: var(--topbar-h, 56px); }
 .topbar {
-  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--line);
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: var(--card); border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 4px rgba(16, 24, 40, .08);
 }
 .brand { font-weight: 700; white-space: nowrap; }
 .tabs { display: flex; gap: 4px; flex: 1; }
