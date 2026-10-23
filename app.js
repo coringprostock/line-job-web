@@ -923,7 +923,15 @@
     partForm.reviewText = items.map(it => fmtDateTime(it.time) + ' ' + it.sender + ': ' + it.text).join('\n').slice(0, 400);
     const job = items.map(it => it.jobLabel || it.inJob || '').find(Boolean);
     if (job) partForm.jobNo = noDigits(job);
+    // รูป/คลิปในก้อนข้อความนั้น แนบเข้ารายการด้วย (Worker หาทั้งก้อน + ดึงเข้า Cloudflare ให้)
+    partForm.files.push({ url: '', state: 'กำลังดึงรูปจากแชท…', fromChat: true, loading: true });
     location.hash = '#part-new';
+    core('chunkMedia', { msgIds: items.map(it => it.msgId) }).then(out => {
+      partForm.files = partForm.files.filter(f => !f.loading).concat(out.items.map(m => ({ key: m.key, url: m.url, type: m.type, fromChat: true,
+        state: m.url ? '' : 'รอดึงจาก NAS' })));
+      if (!out.items.length) toast('ข้อความนี้ไม่มีรูป/คลิป');
+    }).catch(err => { partForm.files = partForm.files.filter(f => !f.loading); if (err.message !== 'login') toast('ดึงรูปจากแชทไม่ได้: ' + err.message); })
+      .then(() => { if (window.partDrawFiles) window.partDrawFiles(); });
   }
 
   // ติ๊กหลายข้อ: เหมือน decide — ปิดหน้าต่าง เอาข้อออกจากจอทันที แล้วบันทึกเบื้องหลัง
@@ -1613,6 +1621,7 @@
       '<div class="panel-box part-info">' +
       '<div><span class="muted">ถอดจาก</span> <b>' + esc(partDonor(p) || '-') + '</b></div>' +
       '<div><span class="muted">ให้งาน</span> ' + (p.job ? '<a href="#job/' + noDigits(p.job) + '">' + esc(p.job) + '</a>' : '-') + (p.customer ? ' · ' + esc(p.customer) : '') + (p.province ? ' จ.' + esc(p.province) : '') + '</div>' +
+      (p.phone ? '<div><span class="muted">เบอร์</span> <a href="tel:' + esc(p.phone) + '">' + esc(p.phone) + '</a></div>' : '') +
       (p.purpose ? '<div><span class="muted">ใช้ทำ</span> ' + esc(p.purpose) + '</div>' : '') +
       '<div><span class="muted">ถอดเมื่อ</span> ' + esc(fmtMs(p.time)) + ' โดย ' + esc(p.by) + '</div>' +
       (p.arrivedAt ? '<div><span class="muted">อะไหล่มา</span> ' + esc(fmtMs(p.arrivedAt)) + (p.arrivedBy ? ' (' + esc(p.arrivedBy) + ')' : '') + '</div>' : '') +
@@ -1620,7 +1629,7 @@
       (p.note ? '<div><span class="muted">โน้ต</span> ' + esc(p.note) + '</div>' : '') + '</div>';
     if (data.files.length) html += '<div class="files">' + data.files.map(f => '<div class="file" data-pkey="' + esc(f.key) + '" data-url="' + esc(f.url) + '">' +
       (f.url ? '<img src="' + esc(f.url) + '" alt="">' : '<div class="vid small">📦 NAS<br>แตะดึง</div>') + '</div>').join('') + '</div>';
-    html += '<div class="actions">' +
+    html += '<div class="actions"><button class="btn" id="p-edit">✏️ แก้ไขรายละเอียด</button>' +
       (p.status === 'รออะไหล่' ? '<button class="btn primary" data-to="arrived">📦 อะไหล่มาแล้ว</button>' : '') +
       (open ? '<button class="btn' + (p.status === 'อะไหล่มาแล้ว' ? ' primary' : '') + '" data-to="done">✅ ใส่คืนแล้ว</button><button class="btn danger" data-to="cancel">ยกเลิกรายการ</button>'
         : '<button class="btn" data-to="reopen">↩︎ เปิดใหม่</button>') + '</div>';
@@ -1642,6 +1651,37 @@
       const note = document.getElementById('note').value.trim();
       if (note) partAction(e.target, p.id, 'note', note);
     };
+    document.getElementById('p-edit').onclick = () => partEditSheet(p);
+  }
+
+  // แก้รายละเอียดทีหลัง (รู้ชื่อลูกค้า / เลขงาน / เบอร์ / จังหวัดภายหลัง) · Worker บันทึกสิ่งที่เปลี่ยนลงไทม์ไลน์
+  function partEditSheet(p) {
+    const f = (name, label, val, extra) => '<label class="field"><span class="lbl">' + label + '</span><input name="' + name + '" value="' + esc(val || '') + '"' + (extra || '') + '></label>';
+    sheet('<h2>✏️ แก้ไข ' + esc(p.no) + '</h2><form id="pe" autocomplete="off">' +
+      f('part', 'อะไหล่ที่ถอด', p.part) +
+      f('donorProduct', 'รุ่นเครื่องที่ถอด', p.donorProduct, ' list="plist3"') + '<datalist id="plist3">' + PRODUCT_HINTS.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+      f('donorSerial', 'SN เครื่องที่ถอด', p.donorSerial) +
+      f('jobNo', 'เลขงานซ่อม', noDigits(p.job || ''), ' inputmode="numeric" placeholder="เช่น 131 (ว่าง = ไม่ผูกงาน)"') +
+      f('customer', 'ชื่อลูกค้า', p.customer) +
+      f('phone', 'เบอร์ลูกค้า', p.phone, ' type="tel" inputmode="tel"') +
+      '<label class="field"><span class="lbl">จังหวัด</span><select name="province"><option value=""></option>' +
+        PROVINCES.map(x => '<option' + (x === p.province ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>' +
+      '<div class="actions"><button class="btn primary" id="pe-ok">บันทึก</button><button type="button" class="btn" data-close>ยกเลิก</button></div></form>', el => {
+      el.querySelector('#pe').onsubmit = async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const part = {};
+        ['part', 'donorProduct', 'donorSerial', 'jobNo', 'customer', 'phone', 'province'].forEach(k => { part[k] = String(fd.get(k) || '').trim(); });
+        busy(el.querySelector('#pe-ok'));
+        try {
+          const out = await core('updatePart', { id: p.id, part });
+          closeSheet();
+          toast(out.changed ? 'แก้ไขแล้ว ' + out.changed + ' ช่อง ✅' : 'ไม่มีอะไรเปลี่ยน');
+          state.parts = null;
+          drawPart(await core('part', { id: p.id }));
+        } catch (err) { if (err.message !== 'login') toast(err.message); unbusy(); }
+      };
+    });
   }
 
   async function partAction(btn, id, to, note) {
@@ -1677,18 +1717,20 @@
       '<label class="field"><span class="lbl">4. ของงานไหน: เลขงานซ่อม</span><input name="jobNo" inputmode="numeric" placeholder="เช่น 131" value="' + esc(v.jobNo || '') + '"></label>' +
       '<div class="muted small">หรือ ถ้าไม่มีเลขงาน</div>' +
       '<label class="field"><span class="lbl">ชื่อลูกค้า</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
+      '<label class="field"><span class="lbl">เบอร์ลูกค้า (ถ้ามี)</span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label>' +
       '<label class="field"><span class="lbl">จังหวัด</span><select name="province"><option value=""></option>' +
         PROVINCES.map(x => '<option' + (x === v.province ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>' +
       '<label class="check"><input type="checkbox" name="print"' + (v.print === false ? '' : ' checked') + '> ปริ้นป้าย "ห้ามขาย" แปะเครื่องที่ถอด</label>' +
       '<button class="btn primary wide" id="psubmit">บันทึกถอดอะไหล่</button></form>';
     const form = document.getElementById('pf');
-    const keep = () => { const fd = new FormData(form); ['part', 'donorProduct', 'donorSerial', 'jobNo', 'customer', 'province'].forEach(k => { partForm[k] = fd.get(k); });
+    const keep = () => { const fd = new FormData(form); ['part', 'donorProduct', 'donorSerial', 'jobNo', 'customer', 'phone', 'province'].forEach(k => { partForm[k] = fd.get(k); });
       partForm.print = form.print.checked; };
     form.oninput = keep; form.onchange = keep;
     const drawPF = () => {
       const el = document.getElementById('pfiles');
       if (!el) return;
-      el.innerHTML = partForm.files.map((f, i) => '<div class="file"><img src="' + f.url + '" alt="">' + (f.state ? '<span class="fstate' + (f.error ? ' bad' : '') + '">' + esc(f.state) + '</span>' : '') +
+      el.innerHTML = partForm.files.map((f, i) => '<div class="file">' + (f.url && f.type !== 'video' ? '<img src="' + esc(f.url) + '" alt="">' : '<div class="vid">' + (f.type === 'video' ? '🎬' : '🖼️') + '</div>') +
+        (f.state ? '<span class="fstate' + (f.error ? ' bad' : '') + '">' + esc(f.state) + '</span>' : '') +
         '<button type="button" class="fdel" data-i="' + i + '" aria-label="ลบ">✕</button></div>').join('');
       el.querySelectorAll('.fdel').forEach(b => b.onclick = () => { partForm.files.splice(Number(b.dataset.i), 1); drawPF(); });
     };
@@ -1698,6 +1740,7 @@
       uploadFile(file).then(k => { item.key = k; item.state = ''; }).catch(err => { item.state = 'ส่งไม่สำเร็จ'; item.error = true; toast(err.message); }).then(drawPF);
     };
     drawPF();
+    window.partDrawFiles = drawPF; // รูปจากแชท (คิวตรวจ) ดึงเสร็จทีหลัง
     document.getElementById('ppick').onchange = e => { [...e.target.files].forEach(add); e.target.value = ''; };
     document.getElementById('pplate').onchange = async e => {
       const f = e.target.files[0]; e.target.value = '';
@@ -1718,7 +1761,7 @@
     form.onsubmit = async e => {
       e.preventDefault();
       keep();
-      if (partForm.files.some(f => f.state === 'กำลังส่ง')) return toast('รอส่งรูปให้เสร็จก่อน');
+      if (partForm.files.some(f => f.state === 'กำลังส่ง' || f.loading)) return toast('รอส่ง/ดึงรูปให้เสร็จก่อน');
       if (!String(partForm.part || '').trim()) return toast(CORE_ERRORS.no_part);
       if (!String(partForm.donorSerial || '').trim()) return toast(CORE_ERRORS.no_donor_serial);
       if (!String(partForm.jobNo || '').trim() && !String(partForm.customer || '').trim()) return toast(CORE_ERRORS.no_target);
