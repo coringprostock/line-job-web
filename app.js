@@ -1814,7 +1814,9 @@
       core('me').then(m => setPartsBadge(m.partsBadge || 0)).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน)
       api('me').then(me => {
         state.me = me;
-        document.getElementById('me').textContent = me.name;
+        // เวอร์ชันหน้าเว็บต่อท้ายชื่อ (ดูได้ว่ามือถือโหลดไฟล์ใหม่แล้วหรือยัง)
+        const ver = ((document.querySelector('script[src*="app.js"]') || {}).src || '').match(/v=(\d+)/);
+        document.getElementById('me').textContent = me.name + (ver ? ' · v' + ver[1] : '');
         fitTopbar(); // บรรทัดชื่อทำให้แถบสูงขึ้น
         document.title = 'ระบบงานช่าง · ' + me.name; // หัวหน้าต่างของ LINE แสดงชื่อนี้ (ถ้ารองรับ)
         setBadge(me.reviewCount);
