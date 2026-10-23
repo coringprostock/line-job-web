@@ -1706,6 +1706,8 @@
       api('me').then(me => {
         state.me = me;
         document.getElementById('me').textContent = me.name;
+        fitTopbar(); // บรรทัดชื่อทำให้แถบสูงขึ้น
+        document.title = 'ระบบงานช่าง · ' + me.name; // หัวหน้าต่างของ LINE แสดงชื่อนี้ (ถ้ารองรับ)
         setBadge(me.reviewCount);
       }).catch(() => {}); // หน้าหลักแสดงข้อผิดพลาดเองอยู่แล้ว
     } catch (err) {

@@ -336,4 +336,9 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .tab-more.right { right: 0; }
 .tab-more.left { left: 0; }
 .tabs-wrap.more-right .tab-more.right, .tabs-wrap.more-left .tab-more.left { display: block; }
-@media (max-width: 480px) { .me { display: none; } }
+/* มือถือ: ชื่อผู้ใช้เป็นบรรทัดเล็กชิดขวาใต้แท็บ (ไม่บังแท็บ แต่ติดในภาพแคปหน้าจอ) */
+@media (max-width: 480px) {
+  .topbar { flex-wrap: wrap; row-gap: 0; padding-bottom: 4px; }
+  .me { flex: 0 0 100%; max-width: none; text-align: right; font-size: 11px; line-height: 1.3; }
+  .me:not(:empty)::before { content: "👤 "; }
+}
