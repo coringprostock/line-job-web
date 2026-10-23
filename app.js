@@ -368,6 +368,7 @@
     });
     html += '</div>';
     html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button>' +
+      '<a class="btn" href="#part-new/' + noDigits(j.no) + '">🔧 ถอดอะไหล่ให้งานนี้</a>' +
       (j.status !== 'ยกเลิก' ? '<button class="btn danger" id="cancel">ยกเลิกงาน</button>' : '') + '</div>';
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ตลงไทม์ไลน์ เช่น โทรแล้วลูกค้าไม่รับ"></textarea>' +
       '<button class="btn primary" id="save-note">บันทึก</button></div>';
@@ -648,6 +649,7 @@
     } else {
       const review = await api('review');
       if (!live()) return;
+      review.items = review.items.filter(x => !pendingRows.has(x.row));
       state.review = review;
       setBadge(state.review.items.length);
       drawReview();
@@ -900,16 +902,50 @@
     });
   }
 
-  async function decide(it, choice, okMsg) {
-    try {
-      const out = await api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice));
-      closeSheet();
-      toast(okMsg || (out.verdict + ' ✅'));
-      renderReview();
-    } catch (err) {
-      if (err.message !== 'login') toast('⚠️ ' + err.message);
-      unbusy();
+  // ตรวจทีละข้อ: เอาข้อออกจากจอทันที แล้วบันทึกเบื้องหลังเรียงตามลำดับ (Apps Script ช้า ~3–5 วิ/ข้อ ไม่ต้องรอ)
+  // บันทึกครบทุกข้อแล้วค่อยโหลดคิวใหม่เงียบ ๆ ครั้งเดียว · ข้อไหนพลาด แจ้งแล้วโหลดคิวใหม่ (ข้อนั้นกลับมา)
+  let saveChain = Promise.resolve(), saving = 0;
+  const pendingRows = new Set(); // ข้อที่ส่งบันทึกแล้วแต่ยังไม่เสร็จ: โหลดคิวระหว่างนี้ต้องไม่แสดงซ้ำ
+  function decide(it, choice, okMsg) {
+    closeSheet();
+    if (state.review) {
+      state.review.items = state.review.items.filter(x => x !== it);
+      state.selected.delete(it.row);
+      setBadge(state.review.items.length);
+      if (location.hash === '#review' && state.reviewMode === 'queue') { const y = window.scrollY; drawReview(); window.scrollTo(0, y); }
     }
+    saving++;
+    pendingRows.add(it.row);
+    drawSaving();
+    saveChain = saveChain.then(() => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)))
+      .then(out => toast((okMsg || out.verdict) + ' ✅'))
+      .catch(err => { if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message + ' (ข้อนั้นกลับเข้าคิวแล้ว)'); })
+      .then(() => {
+        saving--;
+        pendingRows.delete(it.row);
+        drawSaving();
+        if (!saving && location.hash === '#review' && document.getElementById('sheet').hidden) refreshReviewQuietly();
+      });
+  }
+
+  function drawSaving() {
+    let el = document.getElementById('saving');
+    if (!saving) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'saving'; el.className = 'saving'; document.body.appendChild(el); }
+    el.textContent = '⏳ กำลังบันทึก ' + saving + ' ข้อ…';
+  }
+  window.addEventListener('beforeunload', e => { if (saving) { e.preventDefault(); e.returnValue = ''; } });
+
+  // โหลดคิวใหม่โดยไม่ล้างจอ (คงตำแหน่งเลื่อน) — ได้ตัวเลือกงานใหม่ที่เพิ่งเปิด และข้อที่บันทึกพลาดกลับมา
+  async function refreshReviewQuietly() {
+    try {
+      if (state.reviewMode === 'chat') return renderReview();
+      const review = await api('review');
+      if (saving || location.hash !== '#review' || state.reviewMode !== 'queue' || !document.getElementById('sheet').hidden) return;
+      state.review = review;
+      setBadge(review.items.length);
+      const y = window.scrollY; drawReview(); window.scrollTo(0, y);
+    } catch (err) { /* เงียบ: กดแท็บคิวตรวจซ้ำเพื่อโหลดใหม่ได้ */ }
   }
 
   // ---------- สถิติ ----------
@@ -1077,7 +1113,9 @@
     bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
     bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
     core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
-    no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")'
+    no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")',
+    no_part: 'ใส่ชื่ออะไหล่ที่ถอด', no_donor_serial: 'ใส่ SN ของเครื่องที่ถอด (ถ่ายรูปป้ายให้ AI อ่านได้)', no_target: 'ใส่เลขงานซ่อม หรือชื่อลูกค้าที่ได้อะไหล่',
+    job_not_found: 'ไม่พบเลขงานนี้', part_state: 'รายการนี้เปลี่ยนสถานะไปแล้ว โหลดหน้าใหม่', no_note: 'ใส่เหตุผล / โน้ตก่อน', not_found: 'ไม่พบรายการ'
   };
   const intake = { files: [], attachTo: '' };   // ฟอร์มที่กรอกค้างไว้ (สลับแท็บแล้วกลับมาได้)
 
@@ -1384,6 +1422,197 @@
     document.getElementById('dl-label').onclick = () => { const a = document.createElement('a'); a.href = img.src; a.download = 'label-' + noDigits(d.no) + '.png'; a.click(); };
   }
 
+  // ---------- ถอดอะไหล่ (Worker src/parts.js) ----------
+  // ถอดอะไหล่จากเครื่องใหม่ไปใช้ก่อน → ต้องใส่คืนเมื่ออะไหล่มาถึง · เรียง ของมาแล้วรอใส่คืน → รอนานสุด
+  const PART_LEVEL = { arrived: ['📦', 'ของมาแล้ว รอใส่คืน', 'lv-arrived'], red: ['🔴', 'เกิน 3 เดือน', 'lv-red'], orange: ['🟠', 'เกิน 2 เดือน', 'lv-orange'],
+    yellow: ['🟡', 'เกิน 1 เดือน', 'lv-yellow'], normal: ['⚪', 'ยังไม่ถึงเดือน', 'lv-normal'] };
+  const partDonor = p => [p.donorProduct, p.donorSerial && 'SN ' + p.donorSerial].filter(Boolean).join(' ');
+  const partName = p => p.part + (p.qty && p.qty !== '1' ? ' ×' + p.qty : '');
+  const fmtMs = t => fmtDate(new Date(t).toISOString());
+
+  function setPartsBadge(n) {
+    const b = document.getElementById('parts-badge');
+    if (!b) return;
+    b.textContent = n; b.hidden = !n;
+  }
+
+  async function renderParts() {
+    setTab('parts');
+    const live = claim();
+    state.partsView = state.partsView || 'open';
+    if (!state.parts) $app.innerHTML = '<div class="center muted">กำลังโหลด…</div>'; else drawParts();
+    const data = await core('parts');
+    if (!live()) return;
+    state.parts = data;
+    setPartsBadge(data.open.filter(p => p.level !== 'normal').length);
+    drawParts();
+  }
+
+  function drawParts() {
+    const d = state.parts, q = (state.partsQ || '').trim().toLowerCase();
+    const match = p => !q || [p.no, p.part, p.donorProduct, p.donorSerial, p.job, p.customer, p.by].join(' ').toLowerCase().includes(q);
+    const seg = (k, l) => '<button class="seg' + (state.partsView === k ? ' on' : '') + '" data-pv="' + k + '">' + l + '</button>';
+    let html = '<div class="review-head"><div class="segs">' + seg('open', 'ยังไม่ใส่คืน (' + d.open.length + ')') + seg('closed', 'ปิดแล้ว') + '</div>' +
+      '<a class="btn primary" href="#part-new">＋ บันทึกถอดอะไหล่</a></div>' +
+      '<input class="search" id="pq" type="search" placeholder="ค้นชื่ออะไหล่ รุ่น SN เลขงาน ลูกค้า" value="' + esc(state.partsQ || '') + '">';
+    const card = p => '<a class="card part-card ' + PART_LEVEL[p.level][2] + '" href="#part/' + p.id + '"><div class="top"><span class="no">' + esc(p.no) + '</span><span class="title">' +
+      esc(partName(p)) + '</span><span class="age">' + (p.status === 'อะไหล่มาแล้ว' ? 'มาแล้ว' : p.status === 'รออะไหล่' ? p.days + ' วัน' : esc(p.status)) + '</span></div>' +
+      '<div class="meta"><span>จาก ' + esc(partDonor(p) || '-') + '</span>' + (p.job ? '<span>→ ' + esc(p.job) + '</span>' : '') + (p.customer ? '<span>' + esc(p.customer) + '</span>' : '') +
+      '<span>ถอด ' + esc(fmtMs(p.time)) + ' · ' + esc(p.by) + '</span></div></a>';
+    if (state.partsView === 'closed') {
+      const list = d.closed.filter(match);
+      html += list.length ? list.map(card).join('') : '<div class="center muted">ยังไม่มีรายการที่ปิด</div>';
+    } else {
+      const list = d.open.filter(match);
+      if (!list.length) html += '<div class="center"><p>✅ ไม่มีอะไหล่ค้างใส่คืน</p></div>';
+      ['arrived', 'red', 'orange', 'yellow', 'normal'].forEach(lv => {
+        const g = list.filter(p => p.level === lv);
+        if (!g.length) return;
+        html += '<section class="group"><h3 class="group-head">' + PART_LEVEL[lv][0] + ' ' + PART_LEVEL[lv][1] + ' (' + g.length + ')</h3>' + g.map(card).join('') + '</section>';
+      });
+    }
+    $app.innerHTML = html;
+    $app.querySelectorAll('[data-pv]').forEach(b => b.onclick = () => { state.partsView = b.dataset.pv; drawParts(); });
+    const input = document.getElementById('pq');
+    input.oninput = () => { state.partsQ = input.value; const pos = input.selectionStart; drawParts(); const i = document.getElementById('pq'); i.focus(); i.setSelectionRange(pos, pos); };
+  }
+
+  async function renderPart(id) {
+    setTab('parts');
+    const live = claim();
+    $app.innerHTML = '<div class="center muted">กำลังโหลด…</div>';
+    const data = await core('part', { id });
+    if (live()) drawPart(data);
+  }
+
+  function drawPart(data) {
+    const p = data.part;
+    const lv = PART_LEVEL[p.level];
+    const open = p.status === 'รออะไหล่' || p.status === 'อะไหล่มาแล้ว';
+    let html = '<a class="back" href="#parts">‹ ถอดอะไหล่</a><div class="job-head"><h1>' + esc(p.no) + ' ' + esc(partName(p)) + '</h1>' +
+      '<div class="sub"><span class="pill ' + lv[2] + '">' + esc(p.status) + '</span>' + (open && p.status === 'รออะไหล่' ? ' ' + lv[0] + ' รอมา ' + p.days + ' วัน' : '') + '</div></div>' +
+      '<div class="panel-box part-info">' +
+      '<div><span class="muted">ถอดจาก</span> <b>' + esc(partDonor(p) || '-') + '</b></div>' +
+      '<div><span class="muted">ให้งาน</span> ' + (p.job ? '<a href="#job/' + noDigits(p.job) + '">' + esc(p.job) + '</a>' : '-') + (p.customer ? ' · ' + esc(p.customer) : '') + (p.province ? ' จ.' + esc(p.province) : '') + '</div>' +
+      (p.purpose ? '<div><span class="muted">ใช้ทำ</span> ' + esc(p.purpose) + '</div>' : '') +
+      '<div><span class="muted">ถอดเมื่อ</span> ' + esc(fmtMs(p.time)) + ' โดย ' + esc(p.by) + '</div>' +
+      (p.arrivedAt ? '<div><span class="muted">อะไหล่มา</span> ' + esc(fmtMs(p.arrivedAt)) + (p.arrivedBy ? ' (' + esc(p.arrivedBy) + ')' : '') + '</div>' : '') +
+      (p.doneAt ? '<div><span class="muted">ใส่คืน</span> ' + esc(fmtMs(p.doneAt)) + ' โดย ' + esc(p.doneBy) + '</div>' : '') +
+      (p.note ? '<div><span class="muted">โน้ต</span> ' + esc(p.note) + '</div>' : '') + '</div>';
+    if (data.files.length) html += '<div class="files">' + data.files.map(f => '<a class="file" href="' + esc(f.url) + '" target="_blank"><img src="' + esc(f.url) + '" alt=""></a>').join('') + '</div>';
+    html += '<div class="actions">' +
+      (p.status === 'รออะไหล่' ? '<button class="btn primary" data-to="arrived">📦 อะไหล่มาแล้ว</button>' : '') +
+      (open ? '<button class="btn' + (p.status === 'อะไหล่มาแล้ว' ? ' primary' : '') + '" data-to="done">✅ ใส่คืนแล้ว</button><button class="btn danger" data-to="cancel">ยกเลิกรายการ</button>'
+        : '<button class="btn" data-to="reopen">↩︎ เปิดใหม่</button>') + '</div>';
+    html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ต เช่น สั่งอะไหล่แล้ว PO 123 คาดว่ามา 15 พ.ย."></textarea><button class="btn primary" id="save-note">บันทึก</button></div>';
+    html += '<h3>ไทม์ไลน์</h3><ul class="timeline">' + data.events.map(ev => '<li class="' + (ev.kind === 'ใส่คืนแล้ว' ? 'k-fix' : ev.kind === 'อะไหล่มาแล้ว' ? 'k-status' : ev.kind === 'ถอด' ? 'k-open' : '') +
+      '"><div class="when">' + esc(fmtDateTime(new Date(ev.time).toISOString())) + '</div><div class="what">' + esc(ev.kind) + ' <span class="muted small">โดย ' + esc(ev.by) + '</span></div>' +
+      (ev.detail ? '<div class="text">' + esc(ev.detail) + '</div>' : '') + '</li>').join('') + '</ul>';
+    $app.innerHTML = html;
+    const TITLE = { arrived: '📦 อะไหล่มาแล้ว', done: '✅ ใส่อะไหล่คืนเครื่องแล้ว', cancel: 'ยกเลิกรายการ', reopen: 'เปิดรายการใหม่' };
+    const HINT = { arrived: 'จ๊อบจะทักบอก ' + p.by + ' ให้ไปเบิกจากสโตร์มาใส่คืน', done: 'ใส่คืนที่ ' + partDonor(p) + ' แล้ว (เครื่องนี้ขายได้แล้ว)',
+      cancel: 'เช่น บันทึกผิด / ลูกค้าคืนอะไหล่แล้วใส่คืนทันที', reopen: '' };
+    $app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => sheet('<h2>' + TITLE[b.dataset.to] + '</h2><p class="muted small">' + esc(HINT[b.dataset.to]) + '</p>' +
+      '<label class="field">' + (b.dataset.to === 'cancel' ? 'เหตุผล <b class="req">*</b>' : 'โน้ต (ไม่บังคับ)') + '<textarea id="f-note" rows="2" maxlength="500"></textarea></label>' +
+      '<div class="actions"><button class="btn primary" id="f-ok">บันทึก</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#f-ok').onclick = e => partAction(e.target, p.id, b.dataset.to, el.querySelector('#f-note').value.trim());
+    }));
+    document.getElementById('save-note').onclick = e => {
+      const note = document.getElementById('note').value.trim();
+      if (note) partAction(e.target, p.id, 'note', note);
+    };
+  }
+
+  async function partAction(btn, id, to, note) {
+    if (to === 'cancel' && !note) return toast(CORE_ERRORS.no_note);
+    busy(btn);
+    try {
+      await core('setPart', { id, to, note });
+      closeSheet();
+      toast({ arrived: 'บันทึกแล้ว จ๊อบแจ้งช่างที่ถอดให้แล้ว ✅', done: 'ใส่คืนแล้ว ✅', cancel: 'ยกเลิกแล้ว', reopen: 'เปิดใหม่แล้ว', note: 'บันทึกโน้ตแล้ว' }[to]);
+      state.parts = null;
+      drawPart(await core('part', { id }));
+    } catch (err) { if (err.message !== 'login') toast(err.message); unbusy(); }
+  }
+
+  const partForm = { files: [] }; // ฟอร์มที่กรอกค้างไว้
+  function renderPartNew(jobNo) {
+    setTab('parts');
+    claim();
+    const v = partForm;
+    if (jobNo && !v.jobNo) v.jobNo = jobNo;
+    $app.innerHTML = '<a class="back" href="#parts">‹ ถอดอะไหล่</a><h1>🔧 บันทึกถอดอะไหล่</h1>' +
+      '<p class="muted small">ถอดอะไหล่จากเครื่องใหม่ไปใช้ก่อน → จ๊อบปริ้นป้าย "ห้ามขาย" ให้แปะเครื่อง และเตือนจนกว่าจะใส่คืน</p>' +
+      '<form id="pf" class="intake" autocomplete="off">' +
+      '<label class="field"><span class="lbl">1. อะไหล่ที่ถอด <b class="req">*</b></span><input name="part" placeholder="เรียกตามที่เข้าใจ เช่น ปั๊มไฮดรอลิก" value="' + esc(v.part || '') + '"></label>' +
+      '<div class="field"><span class="lbl">2. รูปอะไหล่</span><div class="files" id="pfiles"></div>' +
+      '<label class="btn"><input type="file" id="ppick" accept="image/*" multiple hidden>＋ ถ่าย / เลือกรูป</label></div>' +
+      '<label class="field"><span class="lbl">3. ถอดจากเครื่องใหม่รุ่น</span><input name="donorProduct" list="plist2" value="' + esc(v.donorProduct || '') + '"><datalist id="plist2">' +
+        PRODUCT_HINTS.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist></label>' +
+      '<div class="field"><span class="lbl">SN เครื่องที่ถอด <b class="req">*</b> (ป้ายเลือนพิมพ์ "ป้ายชำรุด" · ไม่มีป้ายพิมพ์ "ไม่มี SN")</span><input name="donorSerial" value="' + esc(v.donorSerial || '') + '">' +
+        '<label class="btn"><input type="file" id="pplate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่องให้ AI อ่าน SN</label><div class="muted small" id="pplate-out"></div></div>' +
+      '<label class="field"><span class="lbl">4. ของงานไหน: เลขงานซ่อม</span><input name="jobNo" inputmode="numeric" placeholder="เช่น 131" value="' + esc(v.jobNo || '') + '"></label>' +
+      '<div class="muted small">หรือ ถ้าไม่มีเลขงาน</div>' +
+      '<label class="field"><span class="lbl">ชื่อลูกค้า</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
+      '<label class="field"><span class="lbl">จังหวัด</span><select name="province"><option value=""></option>' +
+        PROVINCES.map(x => '<option' + (x === v.province ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>' +
+      '<label class="check"><input type="checkbox" name="print"' + (v.print === false ? '' : ' checked') + '> ปริ้นป้าย "ห้ามขาย" แปะเครื่องที่ถอด</label>' +
+      '<button class="btn primary wide" id="psubmit">บันทึกถอดอะไหล่</button></form>';
+    const form = document.getElementById('pf');
+    const keep = () => { const fd = new FormData(form); ['part', 'donorProduct', 'donorSerial', 'jobNo', 'customer', 'province'].forEach(k => { partForm[k] = fd.get(k); });
+      partForm.print = form.print.checked; };
+    form.oninput = keep; form.onchange = keep;
+    const drawPF = () => {
+      const el = document.getElementById('pfiles');
+      if (!el) return;
+      el.innerHTML = partForm.files.map((f, i) => '<div class="file"><img src="' + f.url + '" alt="">' + (f.state ? '<span class="fstate' + (f.error ? ' bad' : '') + '">' + esc(f.state) + '</span>' : '') +
+        '<button type="button" class="fdel" data-i="' + i + '" aria-label="ลบ">✕</button></div>').join('');
+      el.querySelectorAll('.fdel').forEach(b => b.onclick = () => { partForm.files.splice(Number(b.dataset.i), 1); drawPF(); });
+    };
+    const add = file => {
+      const item = { url: URL.createObjectURL(file), state: 'กำลังส่ง' };
+      partForm.files.push(item); drawPF();
+      uploadFile(file).then(k => { item.key = k; item.state = ''; }).catch(err => { item.state = 'ส่งไม่สำเร็จ'; item.error = true; toast(err.message); }).then(drawPF);
+    };
+    drawPF();
+    document.getElementById('ppick').onchange = e => { [...e.target.files].forEach(add); e.target.value = ''; };
+    document.getElementById('pplate').onchange = async e => {
+      const f = e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      add(f);
+      const out = document.getElementById('pplate-out');
+      out.textContent = 'AI กำลังอ่านป้าย…';
+      try {
+        const r = await core('readPlate', { image: await toDataUrl(await shrink(f, 1600)), mime: 'image/jpeg' });
+        if (!r.serial) { out.textContent = '⚠️ AI อ่านเลขไม่ได้ ถ่ายป้ายให้ชัดขึ้น หรือพิมพ์เอง'; return; }
+        form.donorSerial.value = r.damaged ? 'ป้ายชำรุด ' + r.serial : r.serial;
+        const model = r.product && r.model && !r.product.includes(r.model) ? r.product + ' ' + r.model : r.product || r.model;
+        if (!form.donorProduct.value && model) form.donorProduct.value = model;
+        keep();
+        out.textContent = (r.damaged ? '🏷️ ป้ายชำรุด อ่านได้บางส่วน ' : '✅ AI อ่านได้ ') + r.serial + ' — ตรวจว่าตรงป้าย';
+      } catch (err) { if (err.message !== 'login') out.textContent = '⚠️ ' + err.message; }
+    };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      keep();
+      if (partForm.files.some(f => f.state === 'กำลังส่ง')) return toast('รอส่งรูปให้เสร็จก่อน');
+      if (!String(partForm.part || '').trim()) return toast(CORE_ERRORS.no_part);
+      if (!String(partForm.donorSerial || '').trim()) return toast(CORE_ERRORS.no_donor_serial);
+      if (!String(partForm.jobNo || '').trim() && !String(partForm.customer || '').trim()) return toast(CORE_ERRORS.no_target);
+      if (!String(partForm.jobNo || '').trim() && !partForm.province) return toast('เลือกจังหวัดของลูกค้า');
+      const btn = document.getElementById('psubmit');
+      busy(btn);
+      try {
+        const out = await core('createPart', { part: Object.assign({}, partForm, { files: partForm.files.filter(f => f.key).map(f => f.key) }) });
+        partForm.files.forEach(f => URL.revokeObjectURL(f.url));
+        Object.keys(partForm).forEach(k => delete partForm[k]); partForm.files = [];
+        state.parts = null;
+        toast('บันทึก ' + out.no + ' แล้ว' + (out.print ? ' · ส่งปริ้นป้ายแล้ว' : '') + ' ✅');
+        location.hash = '#part/' + out.id;
+      } catch (err) { if (err.message !== 'login') toast(err.message); unbusy(); }
+    };
+  }
+
   // ---------- เส้นทาง ----------
   async function route() {
     closeSheet();
@@ -1392,7 +1621,12 @@
     const hash = location.hash || '#board';
     try {
       const m = hash.match(/^#job\/(\d+)/);
+      const pm = hash.match(/^#part\/(\d+)/);
+      const pn = hash.match(/^#part-new(?:\/(\d+))?$/);
       if (m) await renderJob(m[1]);
+      else if (pm) await renderPart(pm[1]);
+      else if (pn) renderPartNew(pn[1] || '');
+      else if (hash === '#parts') await renderParts();
       else if (hash === '#review') await renderReview();
       else if (hash === '#stats') await renderStats();
       else if (hash === '#new') { claim(); renderNew(); }
@@ -1437,6 +1671,7 @@
       // ยกเว้นลิงก์ "เปิดหน้างาน" จากการ์ดในแชท (?job=0131) หรือ ?view=review
       const params = new URLSearchParams(location.search);
       const start = params.get('job') ? '#job/' + params.get('job').replace(/\D/g, '')
+        : params.get('part') ? '#part/' + params.get('part').replace(/\D/g, '') : params.get('view') === 'parts' ? '#parts'
         : params.get('view') === 'review' ? '#review' : params.get('view') === 'new' ? '#new' : params.get('view') === 'search' ? '#search' : '#board';
       // ลบ ?job= ออกจาก URL หลังใช้แล้ว: รีเฟรช / LINE เปิดหน้าต่างเดิมซ้ำ จะไม่ค้างที่งานเดิม (กดย้อนกลับไปบอร์ดได้ตามปกติ)
       history.replaceState(null, '', location.pathname + start);
@@ -1446,6 +1681,7 @@
         if (a.getAttribute('href') === (location.hash || '#board')) { e.preventDefault(); route(); }
       }));
       route();
+      core('me').then(m => setPartsBadge(m.partsBadge || 0)).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน)
       api('me').then(me => {
         state.me = me;
         document.getElementById('me').textContent = me.name;

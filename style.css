@@ -302,3 +302,20 @@ details.table td:first-child, details.table th:first-child { text-align: left; }
 .label-img { width: 100%; max-width: 340px; border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; background: #fff; }
 label.btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .new-job-btn { text-decoration: none; white-space: nowrap; padding: 6px 14px; }
+
+/* ตัวบอกว่ายังบันทึกคิวตรวจเบื้องหลังอยู่ (มุมบน ใต้แถบแท็บ) */
+.saving {
+  position: fixed; top: calc(var(--topbar-h, 56px) + 8px); right: 12px; z-index: 12;
+  background: var(--text); color: var(--bg); font-size: 13px; padding: 6px 12px; border-radius: 999px; opacity: .9;
+}
+
+/* ถอดอะไหล่: แถบซ้ายของการ์ดตามระดับเตือน */
+.part-card { border-left: 5px solid var(--line); }
+.part-card .age { font-weight: 700; white-space: nowrap; }
+.lv-arrived { border-left-color: var(--done); }
+.lv-red { border-left-color: var(--danger); }
+.lv-orange { border-left-color: #eb6834; }
+.lv-yellow { border-left-color: #e0a800; }
+.pill.lv-arrived { background: rgba(37, 99, 235, .12); }
+.pill.lv-red { background: rgba(220, 38, 38, .12); }
+.part-info > div { margin: 2px 0; }
