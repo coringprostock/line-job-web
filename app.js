@@ -421,6 +421,52 @@
       await save(data.job.no, { note }, 'บันทึกโน้ตแล้ว');
     };
     loadThumbs();
+    $app.querySelectorAll('[data-media]').forEach(el => el.onclick = () => openMedia({ msgId: el.dataset.media, type: el.dataset.mtype, full: el.dataset.full }));
+  }
+
+  // ---------- ดูรูปเต็ม / เล่นคลิป / ดาวน์โหลด ----------
+  // ref: { msgId } รูป/คลิปในกลุ่ม · { key } ไฟล์จากฟอร์ม/แชท · full = ลิงก์ที่รู้อยู่แล้ว
+  // สำเนาบน Cloudflare เกิน 30 วันถูกลบ → ขอ Mac ดึงคืนจาก NAS แล้วรอ (เช็กทุก 3 วินาที ไม่เกิน ~90 วินาที)
+  async function openMedia(ref) {
+    const { type, full } = ref;
+    const v = document.getElementById('viewer') || Object.assign(document.createElement('div'), { id: 'viewer', className: 'viewer' });
+    document.body.appendChild(v);
+    v.hidden = false;
+    v.innerHTML = '<div class="viewer-bar"><button class="btn" id="v-close">✕ ปิด</button><button class="btn primary" id="v-dl" disabled>⬇️ ดาวน์โหลด</button></div>' +
+      '<div class="viewer-body"><div class="center muted">กำลังโหลด…</div></div>';
+    const close = () => { v.hidden = true; v.innerHTML = ''; };
+    v.querySelector('#v-close').onclick = close;
+    let m = full ? { url: full, download: full + '?dl=1' } : null;
+    const body = v.querySelector('.viewer-body');
+    const ask = () => core('media', ref.key ? { key: ref.key } : { msgId: ref.msgId });
+    try {
+      if (!m) m = await ask();
+      for (let i = 0; m.restoring && i < 30; i++) {
+        if (v.hidden) return; // ปิดหน้าต่างไปแล้ว
+        body.innerHTML = '<div class="center"><p>⏳ ไฟล์นี้เก่ากว่า 1 เดือน กำลังดึงจาก NAS…</p>' +
+          (m.alive ? '<p class="muted small">ปกติไม่เกิน 30 วินาที</p>' : '<p class="muted small">⚠️ เครื่อง Mac ที่ต่อ NAS ไม่ได้ออนไลน์ตอนนี้ ระบบจะดึงให้เมื่อเครื่องเปิด ปิดหน้านี้แล้วกลับมาดูใหม่ได้</p>') + '</div>';
+        await new Promise(r => setTimeout(r, 3000));
+        m = await ask();
+      }
+      if (m.restoring) { body.innerHTML = '<div class="center"><p>⏳ ยังดึงจาก NAS ไม่เสร็จ ลองเปิดใหม่ภายหลังครับ</p></div>'; return; }
+    } catch (err) {
+      if (err.message === 'login') return close();
+      body.innerHTML = '<div class="center"><p>⚠️ ' + esc(err.message) + '</p></div>';
+      return;
+    }
+    if (type === 'image') {
+      body.innerHTML = '<img src="' + esc(m.url) + '" alt="รูปเต็ม"><div class="viewer-hint">แตะรูปเพื่อขยายขนาดจริง / ย่อกลับ</div>';
+      const img = body.querySelector('img');
+      img.onclick = () => body.classList.toggle('zoom');
+    } else if (type === 'video') {
+      body.innerHTML = '<video src="' + esc(m.url) + '" controls playsinline autoplay></video>';
+    } else {
+      body.innerHTML = '<div class="center"><p>📎 ' + esc(m.name || 'ไฟล์') + '</p><p class="muted small">กดดาวน์โหลดด้านบน</p></div>';
+    }
+    const dl = v.querySelector('#v-dl');
+    dl.disabled = false;
+    // ใน LINE เปิดลิงก์ดาวน์โหลดด้วยเบราว์เซอร์ของเครื่อง (บันทึกลงเครื่อง/แชร์ได้)
+    dl.onclick = () => { if (window.liff && liff.isInClient && liff.isInClient()) liff.openWindow({ url: m.download, external: true }); else window.open(m.download, '_blank'); };
   }
 
   function eventHtml(ev) {
@@ -434,15 +480,17 @@
       if (ev.detail) body += '<div class="text">' + esc(ev.detail) + '</div>';
     }
     if (ev.media) {
+      // แตะรูป/คลิป/ไฟล์ = เปิดไฟล์จริง (Worker เก็บไว้ใน R2) + ปุ่มดาวน์โหลด
+      const tap = ' data-media="' + esc(ev.msgId) + '" data-mtype="' + esc(ev.media.type) + '" data-full="' + esc(ev.media.full || '') + '"';
       if (ev.media.type === 'image') {
-        body += ev.media.thumb
+        body += '<div class="media-tap"' + tap + '>' + (ev.media.thumb
           ? '<div class="thumb-ph" data-thumb="' + esc(ev.msgId) + '">กำลังโหลดรูป…</div>'
-          : '<div class="thumb-ph">🖼️ รูป (ยังไม่มีรูปย่อ)</div>';
+          : ev.media.full ? '<img class="thumb" loading="lazy" alt="รูป" src="' + esc(ev.media.full) + '">' : '<div class="thumb-ph">🖼️ รูป — แตะเพื่อดู</div>') +
+          '<span class="media-hint">🔍 แตะดูรูปเต็ม</span></div>';
       } else {
-        body += '<div class="thumb-ph">' + (ev.media.type === 'video' ? '🎬 คลิป' : '📎 ไฟล์') + '</div>';
+        body += '<div class="media-tap"' + tap + '><div class="thumb-ph media-play">' + (ev.media.type === 'video' ? '▶️ คลิป — แตะเพื่อเล่น' : '📎 ไฟล์ — แตะเพื่อดาวน์โหลด') + '</div></div>';
       }
-      if (ev.media.path) body += '<div class="path">ไฟล์เต็ม: ' + esc(ev.media.path) + '</div>';
-      else body += '<div class="path">' + esc(ev.media.status) + '</div>';
+      if (!ev.media.path) body += '<div class="path">' + esc(ev.media.status) + '</div>';
     } else if (ev.msg && ev.msg.type !== 'text') {
       body += '<div class="muted small">[' + esc(ev.msg.type) + ']</div>';
     }
@@ -805,6 +853,7 @@
       const it = data.items[Number(btn.dataset.i)];
       if (btn.dataset.act === 'notjob') { busy(btn); decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว'); }
       else if (btn.dataset.act === 'new') newSheet([it], data.statuses);
+      else if (btn.dataset.act === 'part') partFromReview([it]);
       else attachSheet([it], data.statuses);
     });
     bindPicks();
@@ -830,7 +879,8 @@
       '<div class="text">' + esc(it.text) + '</div><div class="ai">' + ai + '</div><div class="actions">' +
       '<button class="btn' + (it.action === 'งานใหม่' ? ' primary' : '') + '" data-act="new" data-i="' + i + '">＋ งานใหม่</button>' +
       '<button class="btn' + (it.action === 'อัปเดตงานเดิม' ? ' primary' : '') + '" data-act="attach" data-i="' + i + '">📎 แนบงานเดิม</button>' +
-      '<button class="btn" data-act="notjob" data-i="' + i + '">ไม่เกี่ยว</button></div></div>';
+      '<button class="btn" data-act="notjob" data-i="' + i + '">ไม่เกี่ยว</button>' +
+      '<button class="btn" data-act="part" data-i="' + i + '">🔧 ถอดอะไหล่</button></div></div>';
   }
 
   function selectedItems() {
@@ -854,13 +904,26 @@
       '<button class="btn primary" id="bk-accept">✓ ทำตาม AI' + (unsure ? ' (ข้าม ' + unsure + ' ข้อไม่แน่ใจ)' : '') + '</button>' +
       '<button class="btn" id="bk-new">＋ รวมเป็นงานใหม่ 1 งาน</button>' +
       '<button class="btn" id="bk-attach">📎 แนบเข้างาน…</button>' +
-      '<button class="btn" id="bk-notjob">ไม่เกี่ยว</button></div>';
+      '<button class="btn" id="bk-notjob">ไม่เกี่ยว</button>' +
+      '<button class="btn" id="bk-part">🔧 เปิดเป็นถอดอะไหล่</button></div>';
     bar.querySelector('#bk-clear').onclick = () => { state.selected.clear(); if (state.reviewMode === 'chat') drawChat(); else drawReview(); };
     bar.querySelector('#bk-accept').onclick = e => { busy(e.target); decideMany({ decision: 'accept' }); };
     bar.querySelector('#bk-notjob').onclick = e => { busy(e.target); decideMany({ decision: 'notjob' }); };
     const statuses = (state.reviewMode === 'chat' ? state.chat : state.review).statuses;
     bar.querySelector('#bk-new').onclick = () => newSheet(items, statuses);
     bar.querySelector('#bk-attach').onclick = () => attachSheet(items, statuses);
+    bar.querySelector('#bk-part').onclick = () => partFromReview(items);
+  }
+
+  /** คิวตรวจ → ฟอร์มถอดอะไหล่ (เติมเลขงานที่ AI เสนอ + ข้อความแชทเป็นโน้ต) · บันทึกแล้ว ข้อในคิว = แนบเข้างานนั้น / ไม่มีเลขงาน = ไม่เกี่ยวกับงานซ่อม */
+  function partFromReview(items) {
+    Object.keys(partForm).forEach(k => delete partForm[k]);
+    partForm.files = [];
+    partForm.fromReview = items.map(it => ({ row: it.row, msgId: it.msgId }));
+    partForm.reviewText = items.map(it => fmtDateTime(it.time) + ' ' + it.sender + ': ' + it.text).join('\n').slice(0, 400);
+    const job = items.map(it => it.jobLabel || it.inJob || '').find(Boolean);
+    if (job) partForm.jobNo = noDigits(job);
+    location.hash = '#part-new';
   }
 
   // ติ๊กหลายข้อ: เหมือน decide — ปิดหน้าต่าง เอาข้อออกจากจอทันที แล้วบันทึกเบื้องหลัง
@@ -900,7 +963,11 @@
       it.candidates.forEach(c => { if (!opts.some(o => o.no === c.no)) opts.push(c); });
     });
     const many = items.length > 1;
-    sheet('<h2>' + (many ? 'แนบ ' + items.length + ' ข้อเข้างานเดียวกัน' : 'แนบเข้างานเดิม') + '</h2><label class="field">เลขงาน' +
+    sheet('<h2>' + (many ? 'แนบ ' + items.length + ' ข้อเข้างานเดียวกัน' : 'แนบเข้างานเดิม') + '</h2>' +
+      // ค้นงานตรงนี้เลย (เหมือนแท็บค้นหา) ไม่ต้องออกไปค้นแล้วกลับมา
+      '<div class="field"><span class="lbl">🔍 ค้นงาน</span><div class="search-row"><input class="search" id="f-q" type="search" enterkeyhint="search" ' +
+      'placeholder="ชื่อลูกค้า เบอร์ รุ่น SN หรือคำในแชท"><button type="button" class="btn" id="f-go">ค้นหา</button></div><div id="f-res"></div></div>' +
+      '<label class="field">เลขงาน' +
       (opts.length ? '<select id="f-pick">' + opts.map(o => '<option value="' + esc(o.no) + '">' + esc(o.label) + '</option>').join('') +
         '<option value="">พิมพ์เลขงานเอง…</option></select>' : '') +
       '<input id="f-job" inputmode="numeric" placeholder="เช่น 131"' + (opts.length ? ' hidden' : '') + '></label>' +
@@ -909,6 +976,33 @@
       const pick = el.querySelector('#f-pick');
       const input = el.querySelector('#f-job');
       if (pick) pick.onchange = () => { input.hidden = !!pick.value; };
+      const q = el.querySelector('#f-q'), res = el.querySelector('#f-res');
+      const choose = (no, label) => { // เลือกจากผลค้น → ใส่เป็นเลขงานที่จะแนบ
+        if (pick) {
+          let o = [...pick.options].find(x => x.value === no);
+          if (!o) { o = new Option(label, no); pick.insertBefore(o, pick.firstChild); }
+          pick.value = no; input.hidden = true;
+        } else input.value = noDigits(no);
+        res.querySelectorAll('.res-job').forEach(b => b.classList.toggle('on', b.dataset.no === no));
+      };
+      const go = async () => {
+        const v = q.value.trim();
+        if (v.length < 2) return toast('พิมพ์อย่างน้อย 2 ตัวอักษร');
+        res.innerHTML = '<div class="muted small">กำลังค้น…</div>';
+        try {
+          const out = await core('search', { q: v });
+          const jobs = out.jobs.slice(0, 8);
+          res.innerHTML = jobs.length ? jobs.map(j => {
+            const no = j.merged || j.no;
+            return '<button type="button" class="res-job" data-no="' + esc(no) + '" data-label="' + esc(no + ' ' + j.title) + '"><b>' + esc(no) + '</b> ' + esc(j.title) +
+              ' <span class="pill ' + ph(j.status) + '">' + esc(shortStatus(j.status)) + '</span><div class="muted small">' + esc([j.customer, j.phone, 'เปิด ' + fmtDate(j.opened)].filter(Boolean).join(' · ')) +
+              (j.merged ? ' · รวมเข้า ' + esc(j.merged) : '') + '</div></button>';
+          }).join('') : '<div class="muted small">ไม่พบงานที่ตรงกับ "' + esc(v) + '"</div>';
+          res.querySelectorAll('.res-job').forEach(b => b.onclick = () => choose(b.dataset.no, b.dataset.label));
+        } catch (err) { if (err.message !== 'login') res.innerHTML = '<div class="small">⚠️ ' + esc(err.message) + '</div>'; }
+      };
+      el.querySelector('#f-go').onclick = go;
+      q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
       el.querySelector('#f-ok').onclick = e => {
         const job = (pick && pick.value) || input.value.trim();
         if (!job) { toast('ใส่เลขงานก่อน'); return; }
@@ -1138,6 +1232,8 @@
     core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
     no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")',
     no_part: 'ใส่ชื่ออะไหล่ที่ถอด', no_donor_serial: 'ใส่ SN ของเครื่องที่ถอด (ถ่ายรูปป้ายให้ AI อ่านได้)', no_target: 'ใส่เลขงานซ่อม หรือชื่อลูกค้าที่ได้อะไหล่',
+    media_gone: 'ไฟล์นี้เก่าเกินที่ LINE เก็บไว้ ดูได้จาก NAS', media_wait: 'LINE ยังเตรียมคลิปไม่เสร็จ ลองใหม่ในอีกสักครู่',
+    media_retry: 'โหลดไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง', nas_missing: 'ไม่พบไฟล์นี้บน NAS',
     job_not_found: 'ไม่พบเลขงานนี้', part_state: 'รายการนี้เปลี่ยนสถานะไปแล้ว โหลดหน้าใหม่', no_note: 'ใส่เหตุผล / โน้ตก่อน', not_found: 'ไม่พบรายการ'
   };
   const intake = { files: [], attachTo: '' };   // ฟอร์มที่กรอกค้างไว้ (สลับแท็บแล้วกลับมาได้)
@@ -1522,7 +1618,8 @@
       (p.arrivedAt ? '<div><span class="muted">อะไหล่มา</span> ' + esc(fmtMs(p.arrivedAt)) + (p.arrivedBy ? ' (' + esc(p.arrivedBy) + ')' : '') + '</div>' : '') +
       (p.doneAt ? '<div><span class="muted">ใส่คืน</span> ' + esc(fmtMs(p.doneAt)) + ' โดย ' + esc(p.doneBy) + '</div>' : '') +
       (p.note ? '<div><span class="muted">โน้ต</span> ' + esc(p.note) + '</div>' : '') + '</div>';
-    if (data.files.length) html += '<div class="files">' + data.files.map(f => '<a class="file" href="' + esc(f.url) + '" target="_blank"><img src="' + esc(f.url) + '" alt=""></a>').join('') + '</div>';
+    if (data.files.length) html += '<div class="files">' + data.files.map(f => '<div class="file" data-pkey="' + esc(f.key) + '" data-url="' + esc(f.url) + '">' +
+      (f.url ? '<img src="' + esc(f.url) + '" alt="">' : '<div class="vid small">📦 NAS<br>แตะดึง</div>') + '</div>').join('') + '</div>';
     html += '<div class="actions">' +
       (p.status === 'รออะไหล่' ? '<button class="btn primary" data-to="arrived">📦 อะไหล่มาแล้ว</button>' : '') +
       (open ? '<button class="btn' + (p.status === 'อะไหล่มาแล้ว' ? ' primary' : '') + '" data-to="done">✅ ใส่คืนแล้ว</button><button class="btn danger" data-to="cancel">ยกเลิกรายการ</button>'
@@ -1532,6 +1629,7 @@
       '"><div class="when">' + esc(fmtDateTime(new Date(ev.time).toISOString())) + '</div><div class="what">' + esc(ev.kind) + ' <span class="muted small">โดย ' + esc(ev.by) + '</span></div>' +
       (ev.detail ? '<div class="text">' + esc(ev.detail) + '</div>' : '') + '</li>').join('') + '</ul>';
     $app.innerHTML = html;
+    $app.querySelectorAll('[data-pkey]').forEach(el => el.onclick = () => openMedia({ key: el.dataset.pkey, type: /\.(mp4|mov)$/.test(el.dataset.pkey) ? 'video' : 'image', full: el.dataset.url }));
     const TITLE = { arrived: '📦 อะไหล่มาแล้ว', done: '✅ ใส่อะไหล่คืนเครื่องแล้ว', cancel: 'ยกเลิกรายการ', reopen: 'เปิดรายการใหม่' };
     const HINT = { arrived: 'จ๊อบจะทักบอก ' + p.by + ' ให้ไปเบิกจากสโตร์มาใส่คืน', done: 'ใส่คืนที่ ' + partDonor(p) + ' แล้ว (เครื่องนี้ขายได้แล้ว)',
       cancel: 'เช่น บันทึกผิด / ลูกค้าคืนอะไหล่แล้วใส่คืนทันที', reopen: '' };
@@ -1566,6 +1664,8 @@
     if (jobNo && !v.jobNo) v.jobNo = jobNo;
     $app.innerHTML = '<a class="back" href="#parts">‹ ถอดอะไหล่</a><h1>🔧 บันทึกถอดอะไหล่</h1>' +
       '<p class="muted small">ถอดอะไหล่จากเครื่องใหม่ไปใช้ก่อน → จ๊อบปริ้นป้าย "ห้ามขาย" ให้แปะเครื่อง และเตือนจนกว่าจะใส่คืน</p>' +
+      (v.fromReview ? '<div class="panel-box"><b>จากคิวตรวจ ' + v.fromReview.length + ' ข้อ</b><div class="small" style="white-space:pre-wrap">' + esc(v.reviewText) + '</div>' +
+        '<div class="muted small">บันทึกแล้ว ข้อนี้ออกจากคิวเอง (มีเลขงาน = แนบเข้างานนั้น · ไม่มี = ไม่เกี่ยวกับงานซ่อม)</div></div>' : '') +
       '<form id="pf" class="intake" autocomplete="off">' +
       '<label class="field"><span class="lbl">1. อะไหล่ที่ถอด <b class="req">*</b></span><input name="part" placeholder="เรียกตามที่เข้าใจ เช่น ปั๊มไฮดรอลิก" value="' + esc(v.part || '') + '"></label>' +
       '<div class="field"><span class="lbl">2. รูปอะไหล่</span><div class="files" id="pfiles"></div>' +
@@ -1626,7 +1726,13 @@
       const btn = document.getElementById('psubmit');
       busy(btn);
       try {
-        const out = await core('createPart', { part: Object.assign({}, partForm, { files: partForm.files.filter(f => f.key).map(f => f.key) }) });
+        const out = await core('createPart', { part: Object.assign({}, partForm, { files: partForm.files.filter(f => f.key).map(f => f.key),
+          note: partForm.reviewText ? 'จากแชทกลุ่ม: ' + partForm.reviewText : '' }) });
+        if (partForm.fromReview) { // ข้อในคิวตรวจที่มาจากแชทนี้ ออกจากคิว (บันทึกเบื้องหลัง)
+          const items = partForm.fromReview, job = String(partForm.jobNo || '').trim();
+          queueSave(items, () => api('decideMany', Object.assign({ items }, job ? { decision: 'attach', job, status: '' } : { decision: 'notjob' })),
+            () => 'คิวตรวจ: ' + (job ? 'แนบเข้างาน #' + job.padStart(4, '0') : 'ไม่เกี่ยวกับงานซ่อม'));
+        }
         partForm.files.forEach(f => URL.revokeObjectURL(f.url));
         Object.keys(partForm).forEach(k => delete partForm[k]); partForm.files = [];
         state.parts = null;
@@ -1639,6 +1745,7 @@
   // ---------- เส้นทาง ----------
   async function route() {
     closeSheet();
+    { const v = document.getElementById('viewer'); if (v) { v.hidden = true; v.innerHTML = ''; } }
     if (location.hash !== '#review') { const bar = document.getElementById('bulkbar'); if (bar) bar.remove(); }
     { const mv = document.getElementById('movebar'); if (mv) mv.remove(); }
     const hash = location.hash || '#board';
