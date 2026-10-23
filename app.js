@@ -1411,6 +1411,21 @@
   }
   fitTopbar();
   window.addEventListener('resize', fitTopbar);
+  // กันแถบแท็บหลุดจากจอหลังคีย์บอร์ดปิด (iPhone เลื่อนจอที่มองเห็นค้างไว้ ไม่ตรงกับหน้าเว็บ):
+  // เลื่อนแถบตามจอที่มองเห็นจริง และตอนออกจากช่องพิมพ์ให้จอกลับเข้าที่
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const follow = () => {
+      const bar = document.querySelector('.topbar');
+      if (bar) bar.style.transform = vv.offsetTop > 0 ? 'translateY(' + vv.offsetTop + 'px)' : '';
+    };
+    vv.addEventListener('resize', follow);
+    vv.addEventListener('scroll', follow);
+  }
+  document.addEventListener('focusout', e => {
+    if (!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    setTimeout(() => { if (!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) window.scrollTo(window.scrollX, window.scrollY); }, 100);
+  });
   if (document.fonts) document.fonts.ready.then(fitTopbar);
 
   async function start() {

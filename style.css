@@ -44,6 +44,8 @@ body {
 }
 a { color: inherit; }
 button, input, select, textarea { font: inherit; color: inherit; }
+/* iPhone ซูมหน้าเองเมื่อกดช่องพิมพ์ที่ตัวอักษรเล็กกว่า 16px แล้วค้างซูมไว้ แถบแท็บเลยหลุดจากจอ */
+input, select, textarea { font-size: 16px; }
 
 /* แถบแท็บติดบนจอตลอด: ใช้ fixed แทน sticky เพราะ sticky หลุดได้ในเว็บวิวของ LINE บางเครื่อง
    body เว้นที่ด้านบนเท่าความสูงแถบ (--topbar-h วัดจริงจาก app.js) */
