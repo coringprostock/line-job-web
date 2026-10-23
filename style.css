@@ -58,6 +58,7 @@ body { padding-top: var(--topbar-h, 56px); }
 }
 .brand { font-weight: 700; white-space: nowrap; }
 .tabs { display: flex; gap: 4px; flex: 1; }
+.tabs a { flex: 0 0 auto; }
 .tabs a {
   text-decoration: none; padding: 6px 12px; border-radius: 999px; color: var(--muted); white-space: nowrap;
 }
@@ -319,3 +320,20 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .pill.lv-arrived { background: rgba(37, 99, 235, .12); }
 .pill.lv-red { background: rgba(220, 38, 38, .12); }
 .part-info > div { margin: 2px 0; }
+
+/* แท็บล้นจอมือถือ: ขอบที่ยังมีแท็บซ่อนอยู่ จางลง + ลูกศร ‹ › ให้รู้ว่าเลื่อนได้ (app.js ตั้ง class more-left / more-right) */
+.tabs-wrap { position: relative; flex: 1; min-width: 0; }
+.tabs-wrap .tabs { scrollbar-width: none; scroll-behavior: smooth; }
+.tabs-wrap .tabs::-webkit-scrollbar { display: none; }
+.tabs-wrap.more-right .tabs { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent); }
+.tabs-wrap.more-left .tabs { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 44px), transparent); }
+.tabs-wrap.more-left.more-right .tabs { -webkit-mask-image: linear-gradient(to right, transparent, #000 44px, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to right, transparent, #000 44px, #000 calc(100% - 44px), transparent); }
+.tab-more {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; display: none;
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text);
+  font-size: 18px; line-height: 1; padding: 0; box-shadow: 0 1px 4px rgba(16, 24, 40, .15); cursor: pointer;
+}
+.tab-more.right { right: 0; }
+.tab-more.left { left: 0; }
+.tabs-wrap.more-right .tab-more.right, .tabs-wrap.more-left .tab-more.left { display: block; }
+@media (max-width: 480px) { .me { display: none; } }

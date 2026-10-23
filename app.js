@@ -154,7 +154,28 @@
 
   function setTab(tab) {
     document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
+    const cur = document.querySelector('.tabs a.active');
+    if (cur) cur.scrollIntoView({ inline: 'nearest', block: 'nearest' }); // แท็บที่เลือกอยู่ต้องเห็นเสมอ
+    tabHints();
   }
+
+  // แท็บล้นจอ: ขอบจาง + ปุ่ม ‹ › บอกว่ายังมีแท็บซ่อนอยู่ฝั่งไหน
+  function tabHints() {
+    const nav = document.getElementById('tabs'), wrap = document.getElementById('tabs-wrap');
+    if (!nav || !wrap) return;
+    wrap.classList.toggle('more-left', nav.scrollLeft > 4);
+    wrap.classList.toggle('more-right', nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 4);
+  }
+  (() => {
+    const nav = document.getElementById('tabs');
+    if (!nav) return;
+    nav.addEventListener('scroll', tabHints, { passive: true });
+    window.addEventListener('resize', tabHints);
+    document.getElementById('tab-right').onclick = () => nav.scrollBy({ left: nav.clientWidth * 0.7 });
+    document.getElementById('tab-left').onclick = () => nav.scrollBy({ left: -nav.clientWidth * 0.7 });
+    tabHints();
+    if (document.fonts) document.fonts.ready.then(tabHints);
+  })();
 
   // ---------- บอร์ดงาน ----------
   async function renderBoard() {
