@@ -388,7 +388,7 @@
         '</span><span class="lbl">' + esc(shortStatus(s)) + '</span></button>';
     });
     html += '</div>';
-    html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button>' +
+    html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button><button class="btn" id="reprint">🖨️ พิมพ์ป้ายซ้ำ</button>' +
       '<a class="btn" href="#part-new/' + noDigits(j.no) + '">🔧 ถอดอะไหล่ให้งานนี้</a>' +
       (j.status !== 'ยกเลิก' ? '<button class="btn danger" id="cancel">ยกเลิกงาน</button>' : '') + '</div>';
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ตลงไทม์ไลน์ เช่น โทรแล้วลูกค้าไม่รับ"></textarea>' +
@@ -414,6 +414,7 @@
     const cancel = document.getElementById('cancel');
     if (cancel) cancel.onclick = () => statusSheet(data, 'ยกเลิก');
     document.getElementById('rename').onclick = () => renameSheet(data);
+    document.getElementById('reprint').onclick = e => reprintLabel(e.target, { no: data.job.no });
     document.getElementById('save-note').onclick = async e => {
       const note = document.getElementById('note').value.trim();
       if (!note) return;
@@ -422,6 +423,16 @@
     };
     loadThumbs();
     $app.querySelectorAll('[data-media]').forEach(el => el.onclick = () => openMedia({ msgId: el.dataset.media, type: el.dataset.mtype, full: el.dataset.full }));
+  }
+
+  // ป้ายหลุด/หาย → เข้าคิวพิมพ์ใหม่ (พิมพ์เสร็จน้องจ๊อบทักบอกคนที่กด)
+  async function reprintLabel(btn, ref) {
+    busy(btn);
+    try {
+      const out = await core('reprint', ref);
+      toast(out.already ? 'ป้ายนี้อยู่ในคิวพิมพ์แล้ว รอสักครู่ 🖨️' : 'ส่งไปพิมพ์ป้ายแล้ว พิมพ์เสร็จจ๊อบจะทักบอกในแชท 🖨️');
+    } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
+    unbusy();
   }
 
   // ---------- ดูรูปเต็ม / เล่นคลิป / ดาวน์โหลด ----------
@@ -1242,7 +1253,7 @@
     no_part: 'ใส่ชื่ออะไหล่ที่ถอด', no_donor_serial: 'ใส่ SN ของเครื่องที่ถอด (ถ่ายรูปป้ายให้ AI อ่านได้)', no_target: 'ใส่เลขงานซ่อม หรือชื่อลูกค้าที่ได้อะไหล่',
     media_gone: 'ไฟล์นี้เก่าเกินที่ LINE เก็บไว้ ดูได้จาก NAS', media_wait: 'LINE ยังเตรียมคลิปไม่เสร็จ ลองใหม่ในอีกสักครู่',
     media_retry: 'โหลดไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง', nas_missing: 'ไม่พบไฟล์นี้บน NAS',
-    job_not_found: 'ไม่พบเลขงานนี้', part_state: 'รายการนี้เปลี่ยนสถานะไปแล้ว โหลดหน้าใหม่', no_note: 'ใส่เหตุผล / โน้ตก่อน', not_found: 'ไม่พบรายการ'
+    job_not_found: 'ไม่พบเลขงานนี้', part_not_found: 'ไม่พบรายการถอดอะไหล่นี้', part_state: 'รายการนี้เปลี่ยนสถานะไปแล้ว โหลดหน้าใหม่', no_note: 'ใส่เหตุผล / โน้ตก่อน', not_found: 'ไม่พบรายการ'
   };
   const intake = { files: [], attachTo: '' };   // ฟอร์มที่กรอกค้างไว้ (สลับแท็บแล้วกลับมาได้)
 
@@ -1374,7 +1385,7 @@
       '<div class="field"><span class="lbl">ตำแหน่ง</span><div class="search-row"><button type="button" class="btn" id="geo">📍 ตำแหน่งปัจจุบัน</button>' +
         '<input name="mapUrl" placeholder="หรือวางลิงก์ Google Maps" value="' + esc(v.mapUrl || '') + '"></div><div class="muted small" id="geo-out">' +
         (v.lat ? 'ปักหมุดแล้ว ' + v.lat.toFixed(5) + ', ' + v.lng.toFixed(5) : '') + '</div></div>' +
-      '<label class="check"><input type="checkbox" name="atShop"' + (v.atShop ? ' checked' : '') + '> เครื่องอยู่ที่ศูนย์ (พิมพ์ป้าย QR)</label>' +
+      '<label class="check"><input type="checkbox" name="atShop"' + (v.atShop ? ' checked' : '') + '> เครื่องอยู่ที่ศูนย์</label>' +
       '<label class="check"><input type="checkbox" name="sendCard"' + (v.sendCard === false ? '' : ' checked') + '> ส่งการ์ดงานเข้ากลุ่มช่าง</label>' +
       '<div id="attach-note"></div><button class="btn primary wide" id="nsubmit">เปิดงาน</button></form>';
     const form = document.getElementById('nf');
@@ -1630,6 +1641,7 @@
     if (data.files.length) html += '<div class="files">' + data.files.map(f => '<div class="file" data-pkey="' + esc(f.key) + '" data-url="' + esc(f.url) + '">' +
       (f.url ? '<img src="' + esc(f.url) + '" alt="">' : '<div class="vid small">📦 NAS<br>แตะดึง</div>') + '</div>').join('') + '</div>';
     html += '<div class="actions"><button class="btn" id="p-edit">✏️ แก้ไขรายละเอียด</button>' +
+      (open ? '<button class="btn" id="p-reprint">🖨️ พิมพ์ป้ายซ้ำ</button>' : '') +
       (p.status === 'รออะไหล่' ? '<button class="btn primary" data-to="arrived">📦 อะไหล่มาแล้ว</button>' : '') +
       (open ? '<button class="btn' + (p.status === 'อะไหล่มาแล้ว' ? ' primary' : '') + '" data-to="done">✅ ใส่คืนแล้ว</button><button class="btn danger" data-to="cancel">ยกเลิกรายการ</button>'
         : '<button class="btn" data-to="reopen">↩︎ เปิดใหม่</button>') + '</div>';
@@ -1652,6 +1664,8 @@
       if (note) partAction(e.target, p.id, 'note', note);
     };
     document.getElementById('p-edit').onclick = () => partEditSheet(p);
+    const rp = document.getElementById('p-reprint');
+    if (rp) rp.onclick = e => reprintLabel(e.target, { partId: p.id });
   }
 
   // แก้รายละเอียดทีหลัง (รู้ชื่อลูกค้า / เลขงาน / เบอร์ / จังหวัดภายหลัง) · Worker บันทึกสิ่งที่เปลี่ยนลงไทม์ไลน์
