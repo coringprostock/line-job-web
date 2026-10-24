@@ -788,6 +788,9 @@
     drawBulkBar();
   }
 
+  // ก้อนที่บางข้อความอยู่ในงานแล้ว (เช่น ตอบกลับรูปของงานอื่น) · แนบ/เปิดงานจะเอาแค่ข้อความที่เหลือ
+  const partialNote = labels => '<span class="muted small">📂 บางข้อความอยู่ใน ' + labels.map(esc).join(', ') + ' แล้ว (ไม่ย้าย)</span>';
+
   function chatHtml(it) {
     const done = !!(it.inJob || it.human);
     let badge;
@@ -803,7 +806,8 @@
     return '<div class="rv chat' + (done && !aiDid ? ' done' : '') + (on ? ' picked' : '') + '"><label class="pick">' +
       (done ? '' : '<input type="checkbox" data-pick="' + it.row + '"' + (on ? ' checked' : '') + '>') +
       '<span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
-      '<div class="text">' + esc(it.text) + '</div>' + badge + (it.reason && !done ? '<div class="muted small">' + esc(it.reason) + '</div>' : '') + '</div>';
+      '<div class="text">' + esc(it.text) + '</div>' + badge + (it.reason && !done ? '<div class="muted small">' + esc(it.reason) + '</div>' : '') +
+      (!done && it.inJobs && it.inJobs.length ? '<div>' + partialNote(it.inJobs) + '</div>' : '') + '</div>';
   }
 
   function bindPicks() {
@@ -884,6 +888,7 @@
     if (it.status) ai += '<br>สถานะ: ' + esc(it.status);
     if (it.candidates.length) ai += '<br>อาจเป็น: ' + it.candidates.map(c => esc(c.label)).join(' / ');
     ai += '<br><span class="' + confCls + '">มั่นใจ ' + it.conf + '%</span> · ' + esc(it.reason);
+    if (it.inJobs && it.inJobs.length) ai += '<br>' + partialNote(it.inJobs);
     const on = state.selected.has(it.row);
     return '<div class="rv' + (on ? ' picked' : '') + '"><label class="pick"><input type="checkbox" data-pick="' + it.row + '"' +
       (on ? ' checked' : '') + '><span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
