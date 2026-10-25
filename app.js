@@ -80,8 +80,25 @@
   const D1_ACTIONS = ['board', 'job'];
   // บันทึกยังเขียนผ่าน Apps Script (ชีตเป็นตัวหลัก) แล้วสั่งซิงก์ให้ D1 ตามทันที
   const WRITE_ACTIONS = ['update', 'moveMsgs', 'newJob', 'decide', 'decideMany'];
-  async function api(action, data, attempt = 1) {
-    if (attempt === 1 && CFG.CORE_URL && D1_ACTIONS.indexOf(action) >= 0) {
+  // หลังย้ายระบบ (Worker ตอบ primary = d1): ทุกคำขอไป Worker ที่เดียว ไม่ผ่าน Apps Script
+  // จำค่าไว้ในเครื่อง · Apps Script ตอบ moved = ย้ายแล้ว → ไป Worker · Worker ตอบ not_primary = สลับกลับ → ไป Apps Script
+  function setPrimary(v) {
+    state.primary = v === 'd1' ? 'd1' : 'sheet';
+    try { localStorage.setItem('primary', state.primary); } catch (e) { /* โหมดส่วนตัว */ }
+  }
+  try { state.primary = localStorage.getItem('primary') || 'sheet'; } catch (e) { state.primary = 'sheet'; }
+  // viaSheet = Worker ไม่ตอบ (ล่ม) → ลอง Apps Script แทน (โหมดฉุกเฉิน: ผู้ดูแลตั้งชีตกลับเป็นตัวหลัก)
+  async function api(action, data, attempt = 1, viaSheet = false) {
+    if (CFG.CORE_URL && state.primary === 'd1' && !viaSheet) {
+      try {
+        return await core(action, data, READ_ACTIONS.indexOf(action) >= 0 ? 20000 : API_TIMEOUT_MS);
+      } catch (err) {
+        if (err.network) return api(action, data, attempt, true);
+        if (err.code !== 'not_primary') throw err;
+        setPrimary('sheet');
+      }
+    }
+    if (attempt === 1 && !viaSheet && CFG.CORE_URL && D1_ACTIONS.indexOf(action) >= 0) {
       try {
         if (data && data.fresh) state.syncing = state.syncing || syncD1();
         if (state.syncing) await state.syncing;
@@ -104,7 +121,7 @@
       out = await res.json();
     } catch (err) {
       // เน็ตหลุด / ระบบไม่ตอบ: อ่านข้อมูลลองซ้ำ 1 ครั้ง (การบันทึกไม่ลองซ้ำเอง กันบันทึกซ้อน)
-      if (attempt === 1 && READ_ACTIONS.indexOf(action) >= 0) return api(action, data, 2);
+      if (attempt === 1 && READ_ACTIONS.indexOf(action) >= 0) return api(action, data, 2, viaSheet);
       throw new Error('เชื่อมต่อไม่สำเร็จ (เน็ตหลุดหรือระบบตอบช้า) ลองใหม่อีกครั้ง');
     } finally {
       clearTimeout(timer);
@@ -114,6 +131,9 @@
       liff.login({ redirectUri: location.href });
       throw new Error('login');
     }
+    if (out.error === 'moved' && viaSheet) throw new Error('ระบบหลักไม่ตอบ ลองใหม่อีกครั้งในอีกสักครู่');
+    if (out.error === 'moved' && CFG.CORE_URL && state.primary !== 'd1') { setPrimary('d1'); return api(action, data, attempt); }
+    if (viaSheet && !out.error && state.primary === 'd1') setPrimary('sheet'); // ชีตรับแล้ว = โหมดฉุกเฉิน
     if (out.error) throw new Error(ERRORS[out.error] || out.error);
     if (CFG.CORE_URL && WRITE_ACTIONS.indexOf(action) >= 0) state.syncing = syncD1();
     return out;
@@ -1272,11 +1292,14 @@
         body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, data || {})) });
       out = await res.json().catch(() => ({ error: 'server_error' }));
     } catch (err) {
-      throw new Error('เชื่อมต่อไม่สำเร็จ (เน็ตหลุดหรือระบบตอบช้า) ลองใหม่อีกครั้ง');
+      const e = new Error('เชื่อมต่อไม่สำเร็จ (เน็ตหลุดหรือระบบตอบช้า) ลองใหม่อีกครั้ง');
+      e.network = true;
+      throw e;
     } finally { clearTimeout(timer); }
     if (out.ms) console.log('core', action, out.ms + ' ms');
     if (out.error === 'login_expired' || out.error === 'login_required') { liff.login({ redirectUri: location.href }); throw new Error('login'); }
-    if (out.error) throw new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error);
+    if (out.error) { const e = new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error); e.code = out.error; throw e; }
+    if (action === 'me' && out.primary && out.primary !== state.primary) setPrimary(out.primary);
     return out;
   }
 
@@ -1873,7 +1896,7 @@
         if (a.getAttribute('href') === (location.hash || '#board')) { e.preventDefault(); route(); }
       }));
       route();
-      core('me').then(m => setPartsBadge(m.partsBadge || 0)).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน)
+      core('me').then(m => { setPartsBadge(m.partsBadge || 0); if (m.reviewCount !== undefined) setBadge(m.reviewCount); }).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน) · หลังย้าย: ป้ายคิวตรวจด้วย
       api('me').then(me => {
         state.me = me;
         // เวอร์ชันหน้าเว็บต่อท้ายชื่อ (ดูได้ว่ามือถือโหลดไฟล์ใหม่แล้วหรือยัง)
