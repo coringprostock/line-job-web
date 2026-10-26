@@ -751,9 +751,10 @@
       try {
         const keys = [];
         for (const f of picked) keys.push(await uploadFile(f));
+        toast('🤖 AI กำลังอ่านรูป เติมข้อมูลงาน…');
         const out = await core('addFiles', { no: data.job.no, files: keys });
         if (/^#job\//.test(location.hash)) drawJob(out);
-        toast('เพิ่มรูปเข้างานแล้ว ✅');
+        toast('เพิ่มรูปเข้างานแล้ว ✅' + aiNote(out.ai) + (out.aiDoubt ? ' · ⚠️ ' + out.aiDoubt : ''));
       } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
     };
   }
@@ -1060,8 +1061,11 @@
     if (!picked.length) return;
     const items = picked.map(it => ({ row: it.row, msgId: it.msgId }));
     queueSave(picked, () => api('decideMany', Object.assign({ items }, choice)),
-      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' : '') + (out.job ? ' · ' + out.job : ''));
+      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' : '') + (out.job ? ' · ' + out.job : '') + aiNote(out.ai));
   }
+
+  // AI อ่านข้อความ/รูปแล้วเติมข้อมูลงานให้ (Worker) → บอกว่าเติมช่องไหน
+  const aiNote = list => list && list.length ? ' · 🤖 AI เติม ' + list.join(', ') : '';
 
   // noClose = ย้ายข้อความในหน้างานตั้งเป็นปิดไม่ได้ (ปิดจากหน้างานต้องมีสรุป) · คิวตรวจปิดได้ ไม่บังคับสรุป
   const statusOptions = (statuses, selected, withKeep, noClose) => (statuses = statuses.filter(s => !noClose || s !== 'ปิด'),
@@ -1075,7 +1079,8 @@
     sheet('<h2>' + (many ? 'รวม ' + items.length + ' ข้อเป็นงานใหม่ 1 งาน' : 'เปิดงานใหม่') + '</h2>' +
       '<label class="field">ชื่องาน<input id="f-title" maxlength="120" value="' + esc(first.title || '') +
       '"></label><label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, first.status || 'รับแจ้ง') +
-      '</select></label>' + reviewNoteField + '<div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      '</select></label>' + reviewNoteField + '<p class="muted small">🤖 AI จะอ่านข้อความและรูปทั้งหมดที่เลือก แล้วเติมข้อมูลงาน (ลูกค้า เบอร์ สินค้า SN อาการ ที่อยู่) ให้เอง</p>' +
+      '<div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       el.querySelector('#f-ok').onclick = e => {
         busy(e.target);
         const choice = { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim() };
@@ -1146,7 +1151,7 @@
   let saveChain = Promise.resolve(), saving = 0;
   const pendingRows = new Set(); // ข้อที่ส่งบันทึกแล้วแต่ยังไม่เสร็จ: โหลดคิวระหว่างนี้ต้องไม่แสดงซ้ำ
   function decide(it, choice, okMsg) {
-    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => okMsg || out.verdict);
+    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => (okMsg || out.verdict) + aiNote(out.ai));
   }
 
   /** ปิดหน้าต่าง + เอาข้อออกจากจอทันที → ส่งบันทึกต่อคิว (ทีละคำขอ เรียงตามลำดับที่กด) */
