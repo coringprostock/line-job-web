@@ -491,6 +491,12 @@
       body.innerHTML = '<img src="' + esc(m.url) + '" alt="รูปเต็ม"><div class="viewer-hint">แตะรูปเพื่อขยายขนาดจริง / ย่อกลับ</div>';
       const img = body.querySelector('img');
       img.onclick = () => body.classList.toggle('zoom');
+      const jm = location.hash.match(/^#job\/(\d+)/);
+      if (jm) { // รูปในหน้างาน → ใช้เป็นรูปตัวอย่างของสินค้า (หน้า "สินค้า")
+        const star = Object.assign(document.createElement('button'), { className: 'btn', textContent: '⭐ ใช้เป็นรูปตัวอย่างสินค้า' });
+        v.querySelector('.viewer-bar').insertBefore(star, v.querySelector('#v-dl'));
+        star.onclick = () => refPickSheet(ref.key ? { key: ref.key, job: '#' + jm[1].padStart(4, '0') } : { msgId: ref.msgId, job: '#' + jm[1].padStart(4, '0') });
+      }
     } else if (type === 'video') {
       body.innerHTML = '<video src="' + esc(m.url) + '" controls playsinline autoplay></video>';
     } else {
@@ -1363,6 +1369,7 @@
     bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', no_contact: 'ใส่ชื่อลูกค้า หรือเบอร์ อย่างใดอย่างหนึ่ง', no_photo: 'ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
     bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
     core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
+    no_name: 'ใส่ชื่อสินค้าก่อน', too_many_images: 'สินค้านี้มีรูปตัวอย่างครบ 40 รูปแล้ว ลบรูปเก่าก่อน', already_decided: 'ข้อเสนอนี้มีคนตัดสินไปแล้ว',
     no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")',
     no_part: 'ใส่ชื่ออะไหล่ที่ถอด', no_donor_serial: 'ใส่ SN ของเครื่องที่ถอด (ถ่ายรูปป้ายให้ AI อ่านได้)', no_target: 'ใส่เลขงานซ่อม หรือชื่อลูกค้าที่ได้อะไหล่',
     media_gone: 'ไฟล์นี้เก่าเกินที่ LINE เก็บไว้ ดูได้จาก NAS', media_wait: 'LINE ยังเตรียมคลิปไม่เสร็จ ลองใหม่ในอีกสักครู่',
@@ -1412,8 +1419,8 @@
   }
   const toDataUrl = blob => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
 
-  async function uploadFile(file) {
-    const blob = await shrink(file);
+  async function uploadFile(file, max) {
+    const blob = await shrink(file, max);
     const res = await fetch(CFG.CORE_URL + '/api/upload', { method: 'POST', body: blob,
       headers: { 'X-Id-Token': liff.getIDToken(), 'Content-Type': blob.type || file.type } });
     const out = await res.json().catch(() => ({ error: 'server_error' }));
@@ -1929,6 +1936,155 @@
     };
   }
 
+  // ---------- สินค้า (รายการที่ AI ใช้ระบุเครื่อง + รูปตัวอย่างต่อรุ่น · ผู้ใช้ 24/26 ต.ค. 2569) ----------
+  // ห้ามทำให้ระบบช้า: โหลดเฉพาะตอนเปิดแท็บนี้ · รูปเล็ก lazy · ข้อมูลเก็บใน state ไว้วาดซ้ำทันที
+  const SUG_KIND = { alias: 'คำเรียกใหม่', model: 'รุ่นใหม่', new: 'สินค้าใหม่' };
+  async function renderProducts() {
+    setTab('products');
+    const live = claim();
+    if (state.products) drawProducts(); else $app.innerHTML = '<div class="center muted">กำลังโหลด…</div>';
+    const data = await core('products');
+    if (!live()) return;
+    state.products = data;
+    drawProducts();
+  }
+
+  function drawProducts() {
+    const d = state.products, q = (state.prodQ || '').trim().toLowerCase();
+    let html = '<div class="review-head"><h1 class="h-inline">สินค้า</h1><button class="btn primary" id="pr-new">＋ เพิ่มสินค้า</button></div>' +
+      '<p class="muted small">รายการนี้ AI ใช้ระบุเครื่องในแชท รูป และการเปิดงาน · เพิ่มคำที่ทีมเรียก รุ่นใหม่ และรูปตัวอย่างต่อรุ่น AI จะแม่นขึ้น</p>';
+    if (d.suggestions.length) {
+      html += '<section class="panel-box sug-box"><b>🤖 AI เสนอจากงานจริง (' + d.suggestions.length + ')</b><p class="muted small">กดรับก่อนถึงจะเพิ่มเข้ารายการ · แก้คำก่อนรับได้</p>' +
+        d.suggestions.map(x => '<div class="sug-row"><div><span class="tag">' + SUG_KIND[x.kind] + '</span> ' + (x.product ? esc(x.product) + ' → ' : '') +
+          '<input class="sug-val" data-sv="' + x.id + '" value="' + esc(x.value) + '" maxlength="80"><div class="muted small">' + esc(x.reason) + (x.jobs ? ' · ' + esc(x.jobs) : '') + '</div></div>' +
+          '<div class="actions"><button class="btn primary" data-sug="' + x.id + '" data-ok="1">✓ รับ</button><button class="btn" data-sug="' + x.id + '">✗ ไม่รับ</button></div></div>').join('') + '</section>';
+    }
+    html += '<input class="search" id="prq" type="search" placeholder="ค้นชื่อ รุ่น หรือคำเรียก" value="' + esc(state.prodQ || '') + '">';
+    const list = d.products.filter(p => !q || [p.name, p.models.join(' '), p.aliases.join(' ')].join(' ').toLowerCase().includes(q));
+    html += list.map(p => '<a class="card prod-card" href="#product/' + p.id + '">' +
+      (p.cover ? '<img loading="lazy" src="' + esc(p.cover) + '" alt="">' : '<div class="prod-noimg">📷</div>') +
+      '<div><div class="title">' + esc(p.name) + '</div>' + (p.models.length ? '<div class="small">' + esc(p.models.join(' · ')) + '</div>' : '') +
+      '<div class="muted small">' + (p.aliases.length ? 'คนเรียก: ' + esc(p.aliases.join(', ')) + ' · ' : '') + 'รูปตัวอย่าง ' + p.images + '</div></div></a>').join('') ||
+      '<div class="center muted">ไม่พบสินค้า</div>';
+    html += '<div class="center"><button class="btn" id="pr-learn">🤖 ให้ AI หาคำเรียก/รุ่นใหม่จากงานตอนนี้</button>' +
+      (d.learnedAt ? '<p class="muted small">AI ดูงานล่าสุดเมื่อ ' + esc(fmtMs(d.learnedAt)) + ' (ดูเองสัปดาห์ละครั้ง)</p>' : '') + '</div>';
+    $app.innerHTML = html;
+    document.getElementById('pr-new').onclick = () => productSheet(null);
+    const input = document.getElementById('prq');
+    input.oninput = () => { state.prodQ = input.value; const pos = input.selectionStart; drawProducts(); const i = document.getElementById('prq'); i.focus(); i.setSelectionRange(pos, pos); };
+    $app.querySelectorAll('[data-sug]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      const val = $app.querySelector('[data-sv="' + b.dataset.sug + '"]').value.trim();
+      try { state.products = await core('decideSuggestion', { id: Number(b.dataset.sug), accept: !!b.dataset.ok, value: val }); drawProducts(); toast(b.dataset.ok ? 'เพิ่มเข้ารายการแล้ว ✅' : 'ไม่รับ (AI จะไม่เสนอซ้ำ)'); }
+      catch (err) { b.disabled = false; if (err.message !== 'login') toast('⚠️ ' + err.message); }
+    });
+    document.getElementById('pr-learn').onclick = async e => {
+      e.target.disabled = true; e.target.textContent = '🤖 AI กำลังดูงานล่าสุด… (ราว 20–40 วินาที)';
+      try {
+        const out = await core('learnProducts');
+        state.products = out; drawProducts();
+        toast(out.added ? 'AI เสนอมา ' + out.added + ' ข้อ ดูด้านบน' : out.skipped === 'budget' ? 'วันนี้ใช้งบ AI ครบแล้ว' : 'AI ไม่เจออะไรใหม่');
+      } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); drawProducts(); }
+    };
+  }
+
+  async function renderProduct(id) {
+    setTab('products');
+    const live = claim();
+    $app.innerHTML = '<div class="center muted">กำลังโหลด…</div>';
+    const data = await core('product', { id: Number(id) });
+    if (live()) drawProduct(data);
+  }
+
+  function drawProduct(data) {
+    const p = data.product;
+    let html = '<a class="back" href="#products">‹ สินค้า</a><div class="job-head"><h1>' + esc(p.name) + '</h1></div>' +
+      '<div class="panel-box info-box"><div class="row"><b>ข้อมูลที่ AI ใช้</b><button class="btn" id="pd-edit">✏️ แก้ไข</button></div>' +
+      [['รุ่น', p.models.join(' · ')], ['คนเรียก', p.aliases.join(', ')], ['SN / ป้าย', p.sn_hint], ['ลักษณะ / อาการบ่อย', p.notes]]
+        .map(([l, v]) => '<div class="info-row"><span class="muted">' + l + '</span><span' + (v ? '' : ' class="muted"') + '>' + esc(v || '—') + '</span></div>').join('') +
+      (p.updated ? '<div class="muted small">แก้ล่าสุด ' + esc(fmtMs(p.updated)) + ' · ' + esc(p.updatedBy) + '</div>' : '') + '</div>';
+    html += '<div class="panel-box"><b>รูปตัวอย่าง (' + data.images.length + ')</b><p class="muted small">ถ่ายหลายมุม + ป้ายรุ่น · AI ดูเฉพาะตอนอ่านรูปแล้วไม่แน่ใจว่ารุ่นไหน · ' +
+      'ใช้รูปจากงานได้: เปิดรูปในหน้างาน กด "⭐ ใช้เป็นรูปตัวอย่างสินค้า"</p>' +
+      '<label class="field"><span class="lbl">รุ่นของรูปที่จะเพิ่ม</span><select id="pd-model"><option value="">(ทุกรุ่น / ไม่ระบุ)</option>' +
+      p.models.map(m => '<option>' + esc(m) + '</option>').join('') + '</select></label>' +
+      '<label class="btn"><input type="file" id="pd-pick" accept="image/*" multiple hidden>📷 ถ่าย / เลือกรูป</label>';
+    const groups = {};
+    data.images.forEach(i => { (groups[i.model] = groups[i.model] || []).push(i); });
+    Object.keys(groups).sort().forEach(m => {
+      html += '<div class="small" style="margin-top:10px"><b>' + esc(m || 'ไม่ระบุรุ่น') + '</b></div><div class="files">' + groups[m].map(i =>
+        '<div class="file" data-pimg="' + i.id + '" data-url="' + esc(i.url) + '"><img loading="lazy" src="' + esc(i.thumb) + '" alt=""><button class="fdel" data-pdel="' + i.id + '" aria-label="ลบ">✕</button></div>').join('') + '</div>';
+    });
+    html += '</div><div class="center"><button class="btn" id="pd-hide">🗑️ เอาสินค้านี้ออกจากรายการ</button></div>';
+    $app.innerHTML = html;
+    document.getElementById('pd-edit').onclick = () => productSheet(data);
+    $app.querySelectorAll('[data-pimg]').forEach(el => el.onclick = e => { if (!e.target.dataset.pdel) openMedia({ type: 'image', full: el.dataset.url }); });
+    $app.querySelectorAll('[data-pdel]').forEach(b => b.onclick = async e => {
+      e.stopPropagation();
+      if (!confirm('ลบรูปตัวอย่างนี้?')) return;
+      try { drawProduct(await core('deleteProductImage', { imageId: Number(b.dataset.pdel) })); state.products = null; } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
+    });
+    document.getElementById('pd-pick').onchange = async e => {
+      const picked = [...e.target.files];
+      e.target.value = '';
+      if (!picked.length) return;
+      const model = document.getElementById('pd-model').value;
+      toast('กำลังส่งรูป ' + picked.length + ' รูป…');
+      try {
+        const files = [];
+        for (const f of picked) files.push({ key: await uploadFile(f, 1024), thumb: await uploadFile(f, 240) });
+        drawProduct(await core('addProductImages', { id: p.id, model, files }));
+        state.products = null;
+        toast('เพิ่มรูปตัวอย่างแล้ว ✅');
+      } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
+    };
+    document.getElementById('pd-hide').onclick = async () => {
+      if (!confirm('เอา "' + p.name + '" ออกจากรายการ? (AI จะไม่ใช้ชื่อนี้แล้ว)')) return;
+      try { await core('deleteProduct', { id: p.id }); state.products = null; location.hash = '#products'; } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
+    };
+  }
+
+  function productSheet(data) {
+    const p = data ? data.product : { name: '', models: [], aliases: [], sn_hint: '', notes: '' };
+    const fld = (id, label, inner) => '<label class="field"><span class="lbl">' + label + '</span>' + inner + '</label>';
+    sheet('<h2>' + (data ? 'แก้ ' + esc(p.name) : 'เพิ่มสินค้า') + '</h2>' +
+      fld('n', 'ชื่อสินค้า / ประเภท', '<input id="p-name" maxlength="80" value="' + esc(p.name) + '" placeholder="เช่น เครื่องดัดเหล็ก">') +
+      fld('m', 'รุ่น (คั่นด้วย , )', '<textarea id="p-models" rows="2" maxlength="400" placeholder="นิวตัน 25, นิวตัน 32">' + esc(p.models.join(', ')) + '</textarea>') +
+      fld('a', 'คำที่ทีมเรียก (คั่นด้วย , )', '<textarea id="p-aliases" rows="2" maxlength="300" placeholder="ดัด25, ดัด32">' + esc(p.aliases.join(', ')) + '</textarea>') +
+      fld('s', 'SN / ป้าย (รูปแบบเลข ที่อยู่ป้าย)', '<input id="p-sn" maxlength="120" value="' + esc(p.sn_hint) + '">') +
+      fld('o', 'ลักษณะ / อาการที่เจอบ่อย', '<textarea id="p-notes" rows="2" maxlength="400">' + esc(p.notes) + '</textarea>') +
+      '<div class="actions"><button class="btn primary" id="p-ok">บันทึก</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#p-ok').onclick = async e => {
+        busy(e.target);
+        try {
+          const out = await core('saveProduct', { id: data ? p.id : 0, name: el.querySelector('#p-name').value, models: el.querySelector('#p-models').value,
+            aliases: el.querySelector('#p-aliases').value, sn_hint: el.querySelector('#p-sn').value, notes: el.querySelector('#p-notes').value });
+          closeSheet(); state.products = null;
+          if (data) drawProduct(out); else location.hash = '#product/' + out.product.id;
+          toast('บันทึกแล้ว ✅ AI ใช้รายการใหม่ภายใน 5 นาที');
+        } catch (err) { unbusy(); if (err.message !== 'login') toast('⚠️ ' + err.message); }
+      };
+    });
+  }
+
+  /** รูปในหน้างาน → รูปตัวอย่างของสินค้า (เลือกสินค้า + รุ่น) */
+  async function refPickSheet(from) {
+    let list;
+    try { list = (state.products || (state.products = await core('products'))).products; } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); return; }
+    sheet('<h2>⭐ ใช้เป็นรูปตัวอย่างสินค้า</h2><label class="field"><span class="lbl">สินค้า</span><select id="r-p">' +
+      list.map(p => '<option value="' + p.id + '">' + esc(p.name) + '</option>').join('') + '</select></label>' +
+      '<label class="field"><span class="lbl">รุ่น</span><select id="r-m"></select></label>' +
+      '<div class="actions"><button class="btn primary" id="r-ok">เพิ่มรูป</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      const sel = el.querySelector('#r-p'), mod = el.querySelector('#r-m');
+      const fill = () => { const p = list.find(x => String(x.id) === sel.value); mod.innerHTML = '<option value="">(ไม่ระบุรุ่น)</option>' + (p ? p.models.map(m => '<option>' + esc(m) + '</option>').join('') : ''); };
+      sel.onchange = fill; fill();
+      el.querySelector('#r-ok').onclick = async e => {
+        busy(e.target);
+        try { await core('addProductImages', { id: Number(sel.value), model: mod.value, from }); state.products = null; closeSheet(); toast('เพิ่มเป็นรูปตัวอย่างแล้ว ✅'); }
+        catch (err) { unbusy(); if (err.message !== 'login') toast('⚠️ ' + err.message); }
+      };
+    });
+  }
+
   // ---------- เส้นทาง ----------
   async function route() {
     closeSheet();
@@ -1944,6 +2100,8 @@
       else if (pm) await renderPart(pm[1]);
       else if (pn) renderPartNew(pn[1] || '');
       else if (hash === '#parts') await renderParts();
+      else if (hash === '#products') await renderProducts();
+      else if (/^#product\/\d+$/.test(hash)) await renderProduct(hash.split('/')[1]);
       else if (hash === '#review') await renderReview();
       else if (hash === '#stats') await renderStats();
       else if (hash === '#new') { claim(); renderNew(); }

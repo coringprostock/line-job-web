@@ -376,3 +376,14 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .created-pop h2 { margin: 6px 0 2px; color: #1B7F3B; }
 .created-pop .big-no { font-size: 40px; font-weight: 700; margin-bottom: 8px; }
 .created-pop .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+/* ---------- สินค้า (รายการที่ AI ใช้ + รูปตัวอย่าง) ---------- */
+.h-inline { margin: 0; font-size: 20px; }
+.sug-box { border-color: var(--accent, #4b7bec); }
+.sug-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.sug-row > div:first-child { flex: 1; min-width: 200px; }
+.sug-val { width: 100%; max-width: 260px; margin-top: 4px; }
+.prod-card { display: flex; gap: 12px; align-items: center; }
+.prod-card img, .prod-noimg { width: 64px; height: 64px; flex: none; border-radius: 10px; object-fit: cover; background: var(--chip); }
+.prod-noimg { display: grid; place-items: center; font-size: 24px; opacity: .5; }
+.prod-card .title { font-weight: 600; }
