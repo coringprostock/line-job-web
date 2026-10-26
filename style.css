@@ -362,3 +362,17 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 /* ผลค้นงานในหน้าต่างแนบงาน */
 .res-job { display: block; width: 100%; text-align: left; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); cursor: pointer; }
 .res-job.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+
+/* ข้อมูลงาน (เติม/แก้ทีหลัง) + ป๊อปอัปเปิดงานเสร็จ — v39 */
+.info-box { margin: 10px 0; }
+.info-box .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.info-row { display: flex; gap: 10px; padding: 3px 0; font-size: 14px; }
+.info-row > span:first-child { flex: 0 0 64px; }
+.info-row > span:last-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.info-box .files { margin: 8px 0; }
+.info-box .flag-due { margin-top: 8px; }
+.created-pop { text-align: center; }
+.created-pop .pop-ok { font-size: 56px; line-height: 1.1; }
+.created-pop h2 { margin: 6px 0 2px; color: #1B7F3B; }
+.created-pop .big-no { font-size: 40px; font-weight: 700; margin-bottom: 8px; }
+.created-pop .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }

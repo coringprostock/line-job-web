@@ -401,6 +401,7 @@
     if (off) html += '<p><span class="pill">' + esc(j.status) + '</span></p>';
     html += '</div>';
 
+    html += infoHtml(data);
     html += '<div class="stepper" id="stepper">';
     FLOW.forEach((s, i) => {
       const cls = off ? '' : i < idx ? 'past' : i === idx ? 'current' : '';
@@ -434,6 +435,7 @@
     const cancel = document.getElementById('cancel');
     if (cancel) cancel.onclick = () => statusSheet(data, 'ยกเลิก');
     document.getElementById('rename').onclick = () => renameSheet(data);
+    wireInfo(data);
     document.getElementById('reprint').onclick = e => reprintLabel(e.target, { no: data.job.no });
     document.getElementById('save-note').onclick = async e => {
       const note = document.getElementById('note').value.trim();
@@ -646,7 +648,11 @@
       const data = await api('update', Object.assign({ no }, changes));
       closeSheet();
       if (/^#job\//.test(location.hash)) drawJob(data);
-      toast(okMsg + ' ✅');
+      if (changes.status === 'ปิด') { // ป๊อปอัปปิดงาน (ผู้ใช้ 26 ต.ค. 2569) · น้องจ๊อบทักคนปิดในแชทด้วย
+        sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>ปิดงานแล้ว</h2><div class="big-no">' + esc(no) + '</div>' +
+          '<p>ขอบคุณครับ 🙏</p><p class="muted small">น้องจ๊อบส่งสรุปไว้ในแชทให้แล้ว</p>' +
+          '<div class="actions"><button class="btn primary" data-close>ตกลง</button></div></div>');
+      } else toast(okMsg + ' ✅');
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message);
       if (before && /^#job\//.test(location.hash)) drawJob(before);
@@ -682,6 +688,16 @@
   function statusSheet(data, status) {
     const waiting = data.waitingCustomer.indexOf(status) >= 0;
     const closing = status === 'ปิด' && data.job.status !== 'ปิด';
+    const miss = closing ? (data.closeMissing || []) : [];
+    if (miss.length) { // ปิดงานต้องมี รูป อาการ ชื่อลูกค้า เบอร์ ครบก่อน (Worker ตรวจซ้ำ)
+      return sheet('<h2>ยังปิดงานไม่ได้</h2><p>ต้องเติมข้อมูลให้ครบก่อน: <b>' + esc(miss.join(', ')) + '</b></p>' +
+        '<div class="actions">' + (miss.some(m => m !== 'รูป') ? '<button class="btn primary" id="f-fill">✏️ เติมข้อมูลงาน</button>' : '') +
+        (miss.includes('รูป') ? '<button class="btn' + (miss.length === 1 ? ' primary' : '') + '" id="f-photo">📷 เพิ่มรูป</button>' : '') +
+        '<button class="btn" data-close>ปิด</button></div>', el => {
+        const f = el.querySelector('#f-fill'); if (f) f.onclick = () => infoSheet(data);
+        const ph = el.querySelector('#f-photo'); if (ph) ph.onclick = () => { closeSheet(); document.getElementById('info-pick').click(); };
+      });
+    }
     const html = '<h2>เปลี่ยนเป็น “' + esc(status) + '”</h2>' +
       '<p class="muted small">' + esc(data.job.no) + ' ' + esc(data.job.title) + ' · ตอนนี้: ' + esc(data.job.status) + '</p>' +
       (status === 'ปิด' || status === 'ยกเลิก' ? '' :
@@ -698,6 +714,74 @@
         const date = el.querySelector('#f-date');
         await save(data.job.no, { status, follow: date ? date.value : '', note: el.querySelector('#f-note').value.trim() },
           data.job.no + ' → ' + status);
+      };
+    });
+  }
+
+  // ---------- ข้อมูลงาน: เปิดงานเร็วแล้วเติม/แก้ทีหลัง (สแกน QR ที่ป้ายเข้าหน้านี้) · ปิดงานต้องมี รูป อาการ ชื่อลูกค้า เบอร์ ----------
+  const INFO_ROWS = [['customer', 'ลูกค้า'], ['phone', 'เบอร์'], ['product', 'สินค้า'], ['serial', 'SN'], ['symptom', 'อาการ'], ['address', 'ที่อยู่'], ['province', 'จังหวัด']];
+  function infoHtml(data) {
+    const i = data.info;
+    if (!i) return '';
+    const miss = data.job.closed ? [] : (data.closeMissing || []);
+    let h = '<div class="panel-box info-box"><div class="row"><b>ข้อมูลงาน</b><button class="btn" id="info-edit">✏️ แก้ข้อมูลงาน</button></div>';
+    INFO_ROWS.forEach(([k, label]) => {
+      const v = k === 'phone' && i.phone ? fmtPhoneTh(i.phone) : i[k];
+      h += '<div class="info-row"><span class="muted">' + label + '</span><span' + (v ? '' : ' class="muted"') + '>' + esc(v || '—') + '</span></div>';
+    });
+    const files = data.files || [];
+    h += '<div class="info-row"><span class="muted">รูป/คลิป</span><span>' + i.photos + ' ไฟล์</span></div>';
+    if (files.length) h += '<div class="files">' + files.map(f => '<div class="file" data-fkey="' + esc(f.key) + '" data-ftype="' + f.type + '" data-furl="' + esc(f.url) + '">' +
+      (f.type === 'image' ? '<img loading="lazy" src="' + esc(f.url) + '" alt="">' : '<div class="vid">🎬</div>') + '</div>').join('') + '</div>';
+    h += '<label class="btn"><input type="file" id="info-pick" accept="image/*,video/*" multiple hidden>📷 เพิ่มรูป / คลิป</label>';
+    if (miss.length) h += '<div class="flag-due small">📝 ก่อนปิดงานต้องเติม: ' + esc(miss.join(', ')) + '</div>';
+    return h + '</div>';
+  }
+  const fmtPhoneTh = d => d.length === 10 ? d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6) : d;
+  function wireInfo(data) {
+    const edit = document.getElementById('info-edit');
+    if (!edit) return;
+    edit.onclick = () => infoSheet(data);
+    $app.querySelectorAll('[data-fkey]').forEach(el => el.onclick = () => openMedia({ key: el.dataset.fkey, type: el.dataset.ftype, full: el.dataset.furl }));
+    document.getElementById('info-pick').onchange = async e => {
+      const picked = [...e.target.files];
+      e.target.value = '';
+      if (!picked.length) return;
+      toast('กำลังส่งรูป ' + picked.length + ' ไฟล์…');
+      try {
+        const keys = [];
+        for (const f of picked) keys.push(await uploadFile(f));
+        const out = await core('addFiles', { no: data.job.no, files: keys });
+        if (/^#job\//.test(location.hash)) drawJob(out);
+        toast('เพิ่มรูปเข้างานแล้ว ✅');
+      } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
+    };
+  }
+  function infoSheet(data) {
+    const i = data.info || {};
+    const opt = (list, cur) => '<option value=""></option>' + list.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+    const fld = (k, label, inner) => '<label class="field"><span class="lbl">' + label + '</span>' + inner + '</label>';
+    sheet('<h2>แก้ข้อมูลงาน ' + esc(data.job.no) + '</h2>' +
+      fld('customer', 'ชื่อลูกค้า / ร้าน', '<input id="i-customer" maxlength="80" value="' + esc(i.customer || '') + '">') +
+      fld('phone', 'เบอร์ลูกค้า', '<input id="i-phone" type="tel" inputmode="tel" value="' + esc(i.phone || '') + '">') +
+      fld('symptom', 'อาการ / สิ่งที่ลูกค้าแจ้ง', '<textarea id="i-symptom" rows="3" maxlength="300">' + esc(i.symptom || '') + '</textarea>') +
+      fld('product', 'สินค้า / รุ่น', '<input id="i-product" list="plist2" maxlength="80" value="' + esc(i.product || '') + '"><datalist id="plist2">' +
+        PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist>') +
+      fld('serial', 'SN / เลขเครื่อง (ป้ายชำรุดพิมพ์ "ป้ายชำรุด")', '<input id="i-serial" maxlength="40" value="' + esc(i.serial || '') + '">') +
+      fld('address', 'ที่อยู่', '<textarea id="i-address" rows="2" maxlength="200">' + esc(i.address || '') + '</textarea>') +
+      fld('province', 'จังหวัด', '<select id="i-province">' + opt(PROVINCES, i.province) + '</select>') +
+      '<div class="actions"><button class="btn primary" id="f-ok">บันทึก</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#f-ok').onclick = async e => {
+        const info = {};
+        INFO_ROWS.forEach(([k]) => { info[k] = el.querySelector('#i-' + k).value.trim(); });
+        if (info.phone && info.phone.replace(/\D/g, '').length < 9) return toast(CORE_ERRORS.bad_phone);
+        busy(e.target);
+        try {
+          const out = await core('editInfo', { no: data.job.no, info });
+          closeSheet();
+          if (/^#job\//.test(location.hash)) drawJob(out);
+          toast('บันทึกข้อมูลงานแล้ว ✅');
+        } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
     });
   }
@@ -1271,7 +1355,7 @@
     'เครื่องดัดเหล็ก นิวตัน 25', 'เครื่องดัดเหล็ก นิวตัน 32', 'เครื่องดัดเหล็ก B16', 'เครื่องตัดเหล็ก C32', 'เครื่องเจาะคอริ่ง (ดำ 3800W)',
     'เครื่องเจาะคอริ่ง (น้ำเงิน 3500W)', 'หุ่นยนต์ตัดลวด (wire saw)', 'เครื่องต๊าป 4 นิ้ว', 'เครื่องย้ำโซ่', 'เครื่องปั่นไฟ TREX'];
   const CORE_ERRORS = {
-    bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
+    bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', no_contact: 'ใส่ชื่อลูกค้า หรือเบอร์ อย่างใดอย่างหนึ่ง', no_photo: 'ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
     bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
     core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
     no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")',
@@ -1298,6 +1382,7 @@
     } finally { clearTimeout(timer); }
     if (out.ms) console.log('core', action, out.ms + ' ms');
     if (out.error === 'login_expired' || out.error === 'login_required') { liff.login({ redirectUri: location.href }); throw new Error('login'); }
+    if (out.error === 'need_details') { const e = new Error('ปิดงานไม่ได้ ยังขาด: ' + (out.missing || []).join(', ') + ' — กด ✏️ แก้ข้อมูลงาน เติมก่อน'); e.code = out.error; e.missing = out.missing; throw e; }
     if (out.error) { const e = new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error); e.code = out.error; throw e; }
     if (action === 'me' && out.primary && out.primary !== state.primary) setPrimary(out.primary);
     return out;
@@ -1396,10 +1481,11 @@
     $app.innerHTML = '<form id="nf" class="intake" autocomplete="off">' +
       '<div class="field"><span class="lbl">รูป / คลิป <b class="req">*</b></span><div class="files" id="files"></div>' +
       '<label class="btn"><input type="file" id="fpick" accept="image/*,video/*" multiple hidden>＋ ถ่าย / เลือกรูป คลิป</label></div>' +
-      '<label class="field"><span class="lbl">อาการ / สิ่งที่ลูกค้าแจ้ง <b class="req">*</b></span><textarea name="symptom" rows="3" required>' + esc(v.symptom || '') + '</textarea></label>' +
-      '<label class="field"><span class="lbl">เบอร์ลูกค้า <b class="req">*</b></span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '" required></label>' +
+      '<p class="muted small">เปิดงานเร็ว: บังคับแค่ รูป + ชื่อลูกค้าหรือเบอร์ + SN · อาการ/ข้อมูลอื่น เติมทีหลังในหน้างานได้ (ปิดงานต้องครบ)</p>' +
+      '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน <b class="req">*</b> <span class="muted small">(หรือเบอร์)</span></span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
+      '<label class="field"><span class="lbl">เบอร์ลูกค้า <b class="req">*</b> <span class="muted small">(หรือชื่อ)</span></span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label>' +
       '<div id="dup"></div>' +
-      '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
+      '<label class="field"><span class="lbl">อาการ / สิ่งที่ลูกค้าแจ้ง <span class="muted small">(เติมทีหลังได้)</span></span><textarea name="symptom" rows="3">' + esc(v.symptom || '') + '</textarea></label>' +
       '<label class="field"><span class="lbl">สินค้า / รุ่น</span><input name="product" list="plist" value="' + esc(v.product || '') + '"><datalist id="plist">' +
         PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>' +
       '<div class="field"><span class="lbl">SN / เลขเครื่อง <b class="req">*</b></span>' +
@@ -1528,7 +1614,9 @@
     const form = e.target;
     if (!intake.files.length) return toast('ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์');
     if (intake.files.some(f => f.state === 'กำลังส่ง')) return toast('รอส่งรูป/คลิปให้เสร็จก่อน');
-    if (String(form.phone.value).replace(/\D/g, '').length < 9) return toast(CORE_ERRORS.bad_phone);
+    const phoneDigits = String(form.phone.value).replace(/\D/g, '');
+    if (!intake.attachTo && !phoneDigits && !String(form.customer.value).trim()) { form.customer.focus(); return toast(CORE_ERRORS.no_contact); }
+    if (phoneDigits && phoneDigits.length < 9) return toast(CORE_ERRORS.bad_phone);
     const serial = serialOf(form);
     if (!intake.attachTo && (!serial || (serial.includes('?') && !serial.startsWith('ป้ายชำรุด')))) {
       form.serial.focus(); return toast(serial ? 'SN มีตัวที่อ่านไม่ชัด (?) แก้ให้ถูก หรือเลือก "ป้ายชำรุด"' : CORE_ERRORS.no_serial); }
@@ -1540,7 +1628,8 @@
         address: fd.get('address'), province: fd.get('province'), mapUrl: fd.get('mapUrl'), lat: intake.lat, lng: intake.lng,
         atShop: form.atShop.checked, sendCard: form.sendCard.checked, attachTo: intake.attachTo, files: intake.files.filter(f => f.key).map(f => f.key) };
       const out = await core('createJob', { job });
-      const done = { no: out.no, url: out.url, card: out.card, print: out.print, attached: !!intake.attachTo,
+      const later = [!job.symptom.trim() && 'อาการ', !job.customer.trim() && 'ชื่อลูกค้า', String(job.phone).replace(/\D/g, '').length < 9 && 'เบอร์'].filter(Boolean);
+      const done = { no: out.no, url: out.url, card: out.card, print: out.print, attached: !!intake.attachTo, later,
         label: { no: out.no, model: job.product, symptom: job.symptom, customer: job.customer } };
       intake.files.forEach(f => URL.revokeObjectURL(f.url));
       Object.keys(intake).forEach(k => delete intake[k]);
@@ -1581,6 +1670,14 @@
       '<div id="label-box"></div><div class="actions"><a class="btn primary" href="#job/' + noDigits(d.no) + '">เปิดหน้างาน</a>' +
       '<button class="btn" id="dl-label">ดาวน์โหลดป้าย QR</button><a class="btn" href="#new">เปิดงานอื่น</a></div>' +
       '<div class="muted small">ดาวน์โหลดป้ายแล้วเปิดในแอป NIIMBOT เพื่อพิมพ์ (ฉลาก 50×30 มม.) · ถ้ากดดาวน์โหลดไม่ได้ ให้กดค้างที่รูปแล้วบันทึก</div></div>';
+    // ป๊อปอัป "เปิดงานเรียบร้อยแล้ว" (ผู้ใช้ขอ 26 ต.ค. 2569) · ปิดแล้วเห็นหน้าป้าย QR ด้านล่าง
+    sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>' + (d.attached ? 'เพิ่มเข้างานเรียบร้อยแล้ว' : 'เปิดงานเรียบร้อยแล้ว') + '</h2>' +
+      '<div class="big-no">' + esc(d.no) + '</div>' +
+      (d.later && d.later.length && !d.attached ? '<p class="flag-due small">📝 ก่อนปิดงานต้องเติม: ' + esc(d.later.join(', ')) + ' (เข้าหน้างาน หรือสแกน QR ที่ป้าย)</p>' : '') +
+      '<div class="actions"><button class="btn primary" data-close>ตกลง</button><a class="btn" href="#job/' + noDigits(d.no) + '">' +
+      (d.later && d.later.length ? '📝 เพิ่มรายละเอียดงาน' : 'เปิดหน้างาน') + '</a></div></div>', el => {
+      el.querySelector('a.btn').onclick = () => closeSheet();
+    });
     if (typeof qrcode !== 'function') return;
     const c = labelCanvas(d.label, d.url);
     const img = new Image(); img.src = c.toDataURL('image/png'); img.className = 'label-img'; img.alt = 'ป้าย ' + d.no;
