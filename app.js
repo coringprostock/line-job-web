@@ -211,7 +211,8 @@
     if (location.hash === '' || location.hash === '#board') drawBoard();
   }
 
-  function drawBoard() {
+  // listOnly = พิมพ์ค้นหา: วาดเฉพาะรายการ ไม่สร้างช่องค้นหาใหม่ (สร้างใหม่ทุกตัวอักษร = คีย์บอร์ดมือถือเด้งกลับภาษาเริ่มต้น)
+  function drawBoard(listOnly) {
     state.boardView = state.boardView || pref('boardView') || 'list';
     if (state.boardView === 'dash') return drawDashboard();
     const b = state.board;
@@ -237,11 +238,9 @@
     }
     const chip = (key, label) => '<button class="chip' + (state.filter === key && !q ? ' on' : '') + '" data-filter="' + key + '">' +
       label + ' ' + counts[key] + '</button>';
-    let html = viewToggle() + asOfLine() + '<div class="toolbar"><input class="search" id="q" type="search" placeholder="ค้นหา เลขงาน ชื่อ ลูกค้า เบอร์" value="' +
-      esc(state.query) + '"><div class="chips">' + chip('open', 'เปิดอยู่') + chip('due', '⏰ ถึงวันตาม') +
-      chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') +
-      (state.filter.indexOf(':') > 0 ? '<button class="chip on" data-filter="open">' + esc(state.filter.split(':')[1]) + ' ✕</button>' : '') +
-      '</div></div>';
+    const chips = chip('open', 'เปิดอยู่') + chip('due', '⏰ ถึงวันตาม') + chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') +
+      (state.filter.indexOf(':') > 0 ? '<button class="chip on" data-filter="open">' + esc(state.filter.split(':')[1]) + ' ✕</button>' : '');
+    let html = '';
 
     if (!jobs.length) html += '<div class="center muted">ไม่มีงาน</div>';
     const groups = q || state.filter === 'closed' ? [['', jobs]]
@@ -252,21 +251,22 @@
       list.forEach(j => { html += jobCardHtml(j, b.silentDays); });
       html += '</section>';
     });
-    $app.innerHTML = html;
-    const input = document.getElementById('q');
-    input.oninput = () => {
-      state.query = input.value;
-      const pos = input.selectionStart;
-      drawBoard();
-      const again = document.getElementById('q');
-      again.focus();
-      again.setSelectionRange(pos, pos);
-    };
-    $app.querySelectorAll('[data-filter]').forEach(btn => btn.onclick = () => {
+    const bindFilters = () => $app.querySelectorAll('[data-filter]').forEach(btn => btn.onclick = () => {
       state.filter = btn.dataset.filter;
       state.query = '';
       drawBoard();
     });
+    const listEl = document.getElementById('board-list');
+    if (listOnly && listEl) {
+      document.getElementById('board-chips').innerHTML = chips;
+      listEl.innerHTML = html;
+      return bindFilters();
+    }
+    $app.innerHTML = viewToggle() + asOfLine() + '<div class="toolbar"><input class="search" id="q" type="search" placeholder="ค้นหา เลขงาน ชื่อ ลูกค้า เบอร์" value="' +
+      esc(state.query) + '"><div class="chips" id="board-chips">' + chips + '</div></div><div id="board-list">' + html + '</div>';
+    const input = document.getElementById('q');
+    input.oninput = () => { state.query = input.value; drawBoard(true); };
+    bindFilters();
     bindViewToggle();
     bindRefresh();
   }
@@ -1757,13 +1757,15 @@
     drawParts();
   }
 
-  function drawParts() {
+  function drawParts(listOnly) {
     const d = state.parts, q = (state.partsQ || '').trim().toLowerCase();
     const match = p => !q || [p.no, p.part, p.donorProduct, p.donorSerial, p.job, p.customer, p.by].join(' ').toLowerCase().includes(q);
     const seg = (k, l) => '<button class="seg' + (state.partsView === k ? ' on' : '') + '" data-pv="' + k + '">' + l + '</button>';
     let html = '<div class="review-head"><div class="segs">' + seg('open', 'ยังไม่ใส่คืน (' + d.open.length + ')') + seg('closed', 'ปิดแล้ว') + '</div>' +
       '<a class="btn primary" href="#part-new">＋ บันทึกถอดอะไหล่</a></div>' +
       '<input class="search" id="pq" type="search" placeholder="ค้นชื่ออะไหล่ รุ่น SN เลขงาน ลูกค้า" value="' + esc(state.partsQ || '') + '">';
+    const head = html;
+    html = '';
     const card = p => '<a class="card part-card ' + PART_LEVEL[p.level][2] + '" href="#part/' + p.id + '"><div class="top"><span class="no">' + esc(p.no) + '</span><span class="title">' +
       esc(partName(p)) + '</span><span class="age">' + (p.status === 'อะไหล่มาแล้ว' ? 'มาแล้ว' : p.status === 'รออะไหล่' ? p.days + ' วัน' : esc(p.status)) + '</span></div>' +
       '<div class="meta"><span>จาก ' + esc(partDonor(p) || '-') + '</span>' + (p.job ? '<span>→ ' + esc(p.job) + '</span>' : '') + (p.customer ? '<span>' + esc(p.customer) + '</span>' : '') +
@@ -1780,10 +1782,12 @@
         html += '<section class="group"><h3 class="group-head">' + PART_LEVEL[lv][0] + ' ' + PART_LEVEL[lv][1] + ' (' + g.length + ')</h3>' + g.map(card).join('') + '</section>';
       });
     }
-    $app.innerHTML = html;
+    const listEl = document.getElementById('parts-list');
+    if (listOnly && listEl) { listEl.innerHTML = html; return; }
+    $app.innerHTML = head + '<div id="parts-list">' + html + '</div>';
     $app.querySelectorAll('[data-pv]').forEach(b => b.onclick = () => { state.partsView = b.dataset.pv; drawParts(); });
     const input = document.getElementById('pq');
-    input.oninput = () => { state.partsQ = input.value; const pos = input.selectionStart; drawParts(); const i = document.getElementById('pq'); i.focus(); i.setSelectionRange(pos, pos); };
+    input.oninput = () => { state.partsQ = input.value; drawParts(true); };
   }
 
   async function renderPart(id) {
@@ -1983,7 +1987,7 @@
     drawProducts();
   }
 
-  function drawProducts() {
+  function drawProducts(listOnly) {
     const d = state.products, q = (state.prodQ || '').trim().toLowerCase();
     let html = '<div class="review-head"><h1 class="h-inline">สินค้า</h1><button class="btn primary" id="pr-new">＋ เพิ่มสินค้า</button></div>' +
       '<p class="muted small">รายการนี้ AI ใช้ระบุเครื่องในแชท รูป และการเปิดงาน · เพิ่มคำที่ทีมเรียก รุ่นใหม่ และรูปตัวอย่างต่อรุ่น AI จะแม่นขึ้น</p>';
@@ -1995,17 +1999,20 @@
     }
     html += '<input class="search" id="prq" type="search" placeholder="ค้นชื่อ รุ่น หรือคำเรียก" value="' + esc(state.prodQ || '') + '">';
     const list = d.products.filter(p => !q || [p.name, p.models.join(' '), p.aliases.join(' ')].join(' ').toLowerCase().includes(q));
-    html += list.map(p => '<a class="card prod-card" href="#product/' + p.id + '">' +
+    const listHtml = list.map(p => '<a class="card prod-card" href="#product/' + p.id + '">' +
       (p.cover ? '<img loading="lazy" src="' + esc(p.cover) + '" alt="">' : '<div class="prod-noimg">📷</div>') +
       '<div><div class="title">' + esc(p.name) + '</div>' + (p.models.length ? '<div class="small">' + esc(p.models.join(' · ')) + '</div>' : '') +
       '<div class="muted small">' + (p.aliases.length ? 'คนเรียก: ' + esc(p.aliases.join(', ')) + ' · ' : '') + 'รูปตัวอย่าง ' + p.images + '</div></div></a>').join('') ||
       '<div class="center muted">ไม่พบสินค้า</div>';
+    const listEl = document.getElementById('prod-list');
+    if (listOnly && listEl) { listEl.innerHTML = listHtml; return; }
+    html += '<div id="prod-list">' + listHtml + '</div>';
     html += '<div class="center"><button class="btn" id="pr-learn">🤖 ให้ AI หาคำเรียก/รุ่นใหม่จากงานตอนนี้</button>' +
       (d.learnedAt ? '<p class="muted small">AI ดูงานล่าสุดเมื่อ ' + esc(fmtMs(d.learnedAt)) + ' (ดูเองสัปดาห์ละครั้ง)</p>' : '') + '</div>';
     $app.innerHTML = html;
     document.getElementById('pr-new').onclick = () => productSheet(null);
     const input = document.getElementById('prq');
-    input.oninput = () => { state.prodQ = input.value; const pos = input.selectionStart; drawProducts(); const i = document.getElementById('prq'); i.focus(); i.setSelectionRange(pos, pos); };
+    input.oninput = () => { state.prodQ = input.value; drawProducts(true); };
     $app.querySelectorAll('[data-sug]').forEach(b => b.onclick = async () => {
       b.disabled = true;
       const val = $app.querySelector('[data-sv="' + b.dataset.sug + '"]').value.trim();
