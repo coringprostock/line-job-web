@@ -978,6 +978,7 @@
     $app.querySelectorAll('[data-act]').forEach(btn => btn.onclick = () => {
       const it = data.items[Number(btn.dataset.i)];
       if (btn.dataset.act === 'notjob') { busy(btn); decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว'); }
+      else if (btn.dataset.act === 'dupe') { busy(btn); decide(it, { decision: 'attach', job: btn.dataset.job, status: '' }, 'แนบเข้า ' + btn.dataset.job + ' แล้ว'); }
       else if (btn.dataset.act === 'new') newSheet([it], data.statuses);
       else if (btn.dataset.act === 'part') partFromReview([it]);
       else attachSheet([it], data.statuses);
@@ -1000,14 +1001,23 @@
     if (it.candidates.length) ai += '<br>อาจเป็น: ' + it.candidates.map(c => esc(c.label)).join(' / ');
     ai += '<br><span class="' + confCls + '">มั่นใจ ' + it.conf + '%</span> · ' + esc(it.reason);
     if (it.inJobs && it.inJobs.length) ai += '<br>' + partialNote(it.inJobs);
+    const dup = it.dupes && it.dupes.length;
     const on = state.selected.has(it.row);
     return '<div class="rv' + (on ? ' picked' : '') + '"><label class="pick"><input type="checkbox" data-pick="' + it.row + '"' +
       (on ? ' checked' : '') + '><span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
-      '<div class="text">' + esc(it.text) + '</div><div class="ai">' + ai + '</div><div class="actions">' +
-      '<button class="btn' + (it.action === 'งานใหม่' ? ' primary' : '') + '" data-act="new" data-i="' + i + '">＋ งานใหม่</button>' +
+      '<div class="text">' + esc(it.text) + '</div><div class="ai">' + ai + '</div>' + (dup ? dupeBox(it.dupes, i) : '') + '<div class="actions">' +
+      '<button class="btn' + (it.action === 'งานใหม่' && !dup ? ' primary' : '') + '" data-act="new" data-i="' + i + '">＋ งานใหม่</button>' +
       '<button class="btn' + (it.action === 'อัปเดตงานเดิม' ? ' primary' : '') + '" data-act="attach" data-i="' + i + '">📎 แนบงานเดิม</button>' +
       '<button class="btn" data-act="notjob" data-i="' + i + '">ไม่เกี่ยว</button>' +
       '<button class="btn" data-act="part" data-i="' + i + '">🔧 ถอดอะไหล่</button></div></div>';
+  }
+
+  // งานที่อาจซ้ำ (ลูกค้า/เบอร์/SN เดียวกัน เปิดไว้แล้วจากแชทน้องจ๊อบ ฟอร์ม หรือคิวตรวจ) · ปุ่มแนบเข้างานนั้นได้เลย
+  const VIA = { 'แชทน้องจ๊อบ': 'เปิดจากแชทน้องจ๊อบ', 'ฟอร์มเว็บ': 'เปิดจากฟอร์ม', 'คิวตรวจ': 'เปิดจากคิวตรวจ', 'แยกงาน': 'แยกจากงานอื่น', 'กลุ่ม': 'เปิดในกลุ่ม' };
+  function dupeBox(dupes, i) {
+    return '<div class="dupe"><b>⚠️ อาจเปิดงานนี้ไปแล้ว</b>' + dupes.map(d => '<div class="dupe-row"><div><a href="#job/' + noDigits(d.no) + '">' + esc(d.label) + '</a>' +
+      '<div class="muted small">' + esc([VIA[d.via] || d.via, fmtDateTime(d.opened), d.by ? 'โดย ' + d.by : ''].filter(Boolean).join(' · ')) + ' · ' + esc(d.why) + '</div></div>' +
+      (i === undefined ? '' : '<button class="btn primary" data-act="dupe" data-i="' + i + '" data-job="' + esc(d.no) + '">📎 แนบเข้า ' + esc(d.no) + '</button>') + '</div>').join('') + '</div>';
   }
 
   function selectedItems() {
@@ -1026,9 +1036,10 @@
       document.body.appendChild(bar);
     }
     const unsure = items.filter(it => it.action === 'ไม่แน่ใจ' || !['งานใหม่', 'อัปเดตงานเดิม', 'ไม่เกี่ยวกับงาน'].includes(it.action)).length;
+    const dups = items.filter(it => it.action === 'งานใหม่' && it.dupes && it.dupes.length).length;
     bar.innerHTML = '<div class="bulk-row"><b>เลือก ' + items.length + ' ข้อ</b><button class="icon-btn" id="bk-clear">ล้าง</button></div>' +
       '<div class="bulk-row actions">' +
-      '<button class="btn primary" id="bk-accept">✓ ทำตาม AI' + (unsure ? ' (ข้าม ' + unsure + ' ข้อไม่แน่ใจ)' : '') + '</button>' +
+      '<button class="btn primary" id="bk-accept">✓ ทำตาม AI' + (unsure || dups ? ' (ข้าม ' + [unsure ? unsure + ' ข้อไม่แน่ใจ' : '', dups ? dups + ' ข้ออาจซ้ำ' : ''].filter(Boolean).join(', ') + ')' : '') + '</button>' +
       '<button class="btn" id="bk-new">＋ รวมเป็นงานใหม่ 1 งาน</button>' +
       '<button class="btn" id="bk-attach">📎 แนบเข้างาน…</button>' +
       '<button class="btn" id="bk-notjob">ไม่เกี่ยว</button>' +
@@ -1062,12 +1073,13 @@
   }
 
   // ติ๊กหลายข้อ: เหมือน decide — ปิดหน้าต่าง เอาข้อออกจากจอทันที แล้วบันทึกเบื้องหลัง
-  function decideMany(choice) {
-    const picked = selectedItems();
+  function decideMany(choice, list) {
+    const picked = list || selectedItems();
     if (!picked.length) return;
     const items = picked.map(it => ({ row: it.row, msgId: it.msgId }));
     queueSave(picked, () => api('decideMany', Object.assign({ items }, choice)),
-      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' : '') + (out.job ? ' · ' + out.job : '') + aiNote(out.ai));
+      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' + (out.why && out.why.length ? ' (' + out.why.join(' / ') + ')' : '') : '') +
+        (out.job ? ' · ' + out.job : '') + aiNote(out.ai), err => dupeAsk(picked, choice, err));
   }
 
   // AI อ่านข้อความ/รูปแล้วเติมข้อมูลงานให้ (Worker) → บอกว่าเติมช่องไหน
@@ -1082,16 +1094,23 @@
   function newSheet(items, statuses) {
     const first = items[0];
     const many = items.length > 1;
-    sheet('<h2>' + (many ? 'รวม ' + items.length + ' ข้อเป็นงานใหม่ 1 งาน' : 'เปิดงานใหม่') + '</h2>' +
+    const dupes = [...new Map(items.flatMap(it => it.dupes || []).map(d => [d.no, d])).values()];
+    sheet('<h2>' + (many ? 'รวม ' + items.length + ' ข้อเป็นงานใหม่ 1 งาน' : 'เปิดงานใหม่') + '</h2>' + (dupes.length ? dupeBox(dupes, -1) : '') +
       '<label class="field">ชื่องาน<input id="f-title" maxlength="120" value="' + esc(first.title || '') +
       '"></label><label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, first.status || 'รับแจ้ง') +
       '</select></label>' + reviewNoteField + '<p class="muted small">🤖 AI จะอ่านข้อความและรูปทั้งหมดที่เลือก แล้วเติมข้อมูลงาน (ลูกค้า เบอร์ สินค้า SN อาการ ที่อยู่) ให้เอง</p>' +
-      '<div class="actions"><button class="btn primary" id="f-ok">เปิดงาน</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      '<div class="actions"><button class="btn' + (dupes.length ? '' : ' primary') + '" id="f-ok">' + (dupes.length ? 'เปิดงานใหม่ (คนละงานจริง)' : 'เปิดงาน') +
+      '</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      const run = choice => { if (many) decideMany(choice); else decide(first, choice, null); };
+      // เห็นคำเตือนแล้วยังกดเปิดใหม่ = ยืนยันว่าเป็นคนละงาน (force)
       el.querySelector('#f-ok').onclick = e => {
         busy(e.target);
-        const choice = { decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim() };
-        if (many) decideMany(choice); else decide(first, choice, null);
+        run({ decision: 'new', title: el.querySelector('#f-title').value.trim(), status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim(), force: dupes.length > 0 });
       };
+      el.querySelectorAll('[data-act="dupe"]').forEach(b => b.onclick = () => {
+        busy(b);
+        run({ decision: 'attach', job: b.dataset.job, status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim() });
+      });
     });
   }
 
@@ -1157,11 +1176,26 @@
   let saveChain = Promise.resolve(), saving = 0;
   const pendingRows = new Set(); // ข้อที่ส่งบันทึกแล้วแต่ยังไม่เสร็จ: โหลดคิวระหว่างนี้ต้องไม่แสดงซ้ำ
   function decide(it, choice, okMsg) {
-    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => (okMsg || out.verdict) + aiNote(out.ai));
+    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => (okMsg || out.verdict) + aiNote(out.ai),
+      err => dupeAsk([it], choice, err));
+  }
+
+  /** ระบบตอบว่าอาจซ้ำ (เช่น คิวบนจอเก่า / ไล่ตามแชท) → ถาม: แนบเข้างานนั้น หรือยืนยันเปิดใหม่ */
+  function dupeAsk(items, choice, err) {
+    if (err.code !== 'maybe_duplicate' || !err.dupes) return false;
+    const many = items.length > 1;
+    sheet('<h2>⚠️ อาจเปิดงานนี้ไปแล้ว</h2><p class="muted small">ลูกค้านี้มีงานที่เปิดไว้ใกล้ ๆ กัน ดูให้แน่ใจก่อนเปิดใหม่</p>' + dupeBox(err.dupes) +
+      '<div class="actions">' + err.dupes.map(d => '<button class="btn primary" data-job="' + esc(d.no) + '">📎 แนบเข้า ' + esc(d.no) + '</button>').join('') +
+      '<button class="btn" id="f-force">＋ เปิดงานใหม่ (คนละงานจริง)</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      const go = c => many ? decideMany(c, items) : decide(items[0], c, null);
+      el.querySelectorAll('[data-job]').forEach(b => b.onclick = () => go({ decision: 'attach', job: b.dataset.job, status: choice.status || '', note: choice.note || '' }));
+      el.querySelector('#f-force').onclick = () => go(Object.assign({}, choice, { force: true }));
+    });
+    return true;
   }
 
   /** ปิดหน้าต่าง + เอาข้อออกจากจอทันที → ส่งบันทึกต่อคิว (ทีละคำขอ เรียงตามลำดับที่กด) */
-  function queueSave(list, call, okText) {
+  function queueSave(list, call, okText, onErr) {
     closeSheet();
     unbusy();
     const rows = new Set(list.map(it => it.row));
@@ -1175,7 +1209,7 @@
     drawSaving();
     saveChain = saveChain.then(call)
       .then(out => toast(okText(out) + ' ✅'))
-      .catch(err => { if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message + ' (ข้อนั้นกลับเข้าคิวแล้ว)'); })
+      .catch(err => { if (onErr && onErr(err)) return; if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message + ' (ข้อนั้นกลับเข้าคิวแล้ว)'); })
       .then(() => {
         saving--;
         rows.forEach(r => pendingRows.delete(r));
@@ -1369,7 +1403,7 @@
     bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', no_contact: 'ใส่ชื่อลูกค้า หรือเบอร์ อย่างใดอย่างหนึ่ง', no_photo: 'ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
     bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
     core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
-    no_name: 'ใส่ชื่อสินค้าก่อน', too_many_images: 'สินค้านี้มีรูปตัวอย่างครบ 40 รูปแล้ว ลบรูปเก่าก่อน', already_decided: 'ข้อเสนอนี้มีคนตัดสินไปแล้ว',
+    maybe_duplicate: 'อาจซ้ำกับงานที่มีอยู่แล้ว', no_name: 'ใส่ชื่อสินค้าก่อน', too_many_images: 'สินค้านี้มีรูปตัวอย่างครบ 40 รูปแล้ว ลบรูปเก่าก่อน', already_decided: 'ข้อเสนอนี้มีคนตัดสินไปแล้ว',
     no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")',
     no_part: 'ใส่ชื่ออะไหล่ที่ถอด', no_donor_serial: 'ใส่ SN ของเครื่องที่ถอด (ถ่ายรูปป้ายให้ AI อ่านได้)', no_target: 'ใส่เลขงานซ่อม หรือชื่อลูกค้าที่ได้อะไหล่',
     media_gone: 'ไฟล์นี้เก่าเกินที่ LINE เก็บไว้ ดูได้จาก NAS', media_wait: 'LINE ยังเตรียมคลิปไม่เสร็จ ลองใหม่ในอีกสักครู่',
@@ -1395,7 +1429,7 @@
     if (out.ms) console.log('core', action, out.ms + ' ms');
     if (out.error === 'login_expired' || out.error === 'login_required') { liff.login({ redirectUri: location.href }); throw new Error('login'); }
     if (out.error === 'need_details') { const e = new Error('ปิดงานไม่ได้ ยังขาด: ' + (out.missing || []).join(', ') + ' — กด ✏️ แก้ข้อมูลงาน เติมก่อน'); e.code = out.error; e.missing = out.missing; throw e; }
-    if (out.error) { const e = new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error); e.code = out.error; throw e; }
+    if (out.error) { const e = new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error); e.code = out.error; e.dupes = out.dupes; throw e; }
     if (action === 'me' && out.primary && out.primary !== state.primary) setPrimary(out.primary);
     return out;
   }

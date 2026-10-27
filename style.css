@@ -387,3 +387,9 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .prod-card img, .prod-noimg { width: 64px; height: 64px; flex: none; border-radius: 10px; object-fit: cover; background: var(--chip); }
 .prod-noimg { display: grid; place-items: center; font-size: 24px; opacity: .5; }
 .prod-card .title { font-weight: 600; }
+
+/* อาจเปิดงานซ้ำ (คิวตรวจ) */
+.dupe { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--warn); border-radius: 10px; background: rgba(217, 119, 6, .08); }
+.dupe-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 6px; }
+.dupe-row a { color: inherit; font-weight: 600; }
+.dupe-row .btn { flex: none; }
