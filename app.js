@@ -700,7 +700,7 @@
         '<div class="actions">' + (miss.some(m => m !== 'รูป') ? '<button class="btn primary" id="f-fill">✏️ เติมข้อมูลงาน</button>' : '') +
         (miss.includes('รูป') ? '<button class="btn' + (miss.length === 1 ? ' primary' : '') + '" id="f-photo">📷 เพิ่มรูป</button>' : '') +
         '<button class="btn" data-close>ปิด</button></div>', el => {
-        const f = el.querySelector('#f-fill'); if (f) f.onclick = () => infoSheet(data);
+        const f = el.querySelector('#f-fill'); if (f) f.onclick = () => infoSheet(data, true);
         const ph = el.querySelector('#f-photo'); if (ph) ph.onclick = () => { closeSheet(); document.getElementById('info-pick').click(); };
       });
     }
@@ -764,10 +764,16 @@
       } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
     };
   }
-  function infoSheet(data) {
+  // ช่องที่ต้องมีก่อนปิดงาน (ตรงกับ closeMissing ใน Worker) · ผ่าน = ค่าที่กรอกใช้ได้
+  const CLOSE_NEED = { customer: ['ชื่อลูกค้า', v => !!v.trim()], phone: ['เบอร์', v => v.replace(/\D/g, '').length >= 9], symptom: ['อาการ', v => !!v.trim()] };
+  // closing = มาจากกดปิดงานแล้วข้อมูลไม่ครบ → บันทึกครบแล้วไปหน้าปิดงานต่อ
+  function infoSheet(data, closing) {
     const i = data.info || {};
+    const miss = data.job.closed ? [] : (data.closeMissing || []);
     const opt = (list, cur) => '<option value=""></option>' + list.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
-    const fld = (k, label, inner) => '<label class="field"><span class="lbl">' + label + '</span>' + inner + '</label>';
+    // ช่องที่ขาดก่อนปิด: กรอบแดง + ป้าย "ต้องกรอกก่อนปิดงาน" · กรอกถูกแล้วเปลี่ยนเป็นเขียว "✓ ได้แล้ว"
+    const fld = (k, label, inner) => '<label class="field' + (CLOSE_NEED[k] && miss.includes(CLOSE_NEED[k][0]) ? ' need' : '') + '" data-k="' + k + '"><span class="lbl">' + label +
+      (CLOSE_NEED[k] && miss.includes(CLOSE_NEED[k][0]) ? ' <span class="need-tag">ต้องกรอกก่อนปิดงาน</span>' : '') + '</span>' + inner + '</label>';
     sheet('<h2>แก้ข้อมูลงาน ' + esc(data.job.no) + '</h2>' +
       fld('customer', 'ชื่อลูกค้า / ร้าน', '<input id="i-customer" maxlength="80" value="' + esc(i.customer || '') + '">') +
       fld('phone', 'เบอร์ลูกค้า', '<input id="i-phone" type="tel" inputmode="tel" value="' + esc(i.phone || '') + '">') +
@@ -778,6 +784,18 @@
       fld('address', 'ที่อยู่', '<textarea id="i-address" rows="2" maxlength="200">' + esc(i.address || '') + '</textarea>') +
       fld('province', 'จังหวัด', '<select id="i-province">' + opt(PROVINCES, i.province) + '</select>') +
       '<div class="actions"><button class="btn primary" id="f-ok">บันทึก</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelectorAll('.field.need').forEach(box => {
+        const k = box.dataset.k, input = box.querySelector('#i-' + k), tag = box.querySelector('.need-tag');
+        const check = () => {
+          const ok = CLOSE_NEED[k][1](input.value);
+          box.classList.toggle('ok', ok);
+          tag.textContent = ok ? '✓ ได้แล้ว' : k === 'phone' && input.value.trim() ? 'เบอร์ยังไม่ครบ (อย่างน้อย 9 หลัก)' : 'ต้องกรอกก่อนปิดงาน';
+        };
+        input.addEventListener('input', check);
+        check();
+      });
+      const first = el.querySelector('.field.need:not(.ok)');
+      if (first) first.scrollIntoView({ block: 'center' });
       el.querySelector('#f-ok').onclick = async e => {
         const info = {};
         INFO_ROWS.forEach(([k]) => { info[k] = el.querySelector('#i-' + k).value.trim(); });
@@ -787,7 +805,9 @@
           const out = await core('editInfo', { no: data.job.no, info });
           closeSheet();
           if (/^#job\//.test(location.hash)) drawJob(out);
-          toast('บันทึกข้อมูลงานแล้ว ✅');
+          const left = out.closeMissing || [];
+          if (closing && !left.length) return statusSheet(out, 'ปิด');   // ครบแล้ว → ใส่สรุปการแก้ไขแล้วปิดงานต่อได้เลย
+          toast('บันทึกข้อมูลงานแล้ว ✅' + (closing && left.length ? ' · ยังขาด ' + left.join(', ') : ''));
         } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
     });

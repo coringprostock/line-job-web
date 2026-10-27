@@ -393,3 +393,9 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .dupe-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 6px; }
 .dupe-row a { color: inherit; font-weight: 600; }
 .dupe-row .btn { flex: none; }
+
+/* แก้ข้อมูลงาน: ช่องที่ต้องกรอกก่อนปิดงาน (แดง) → กรอกถูกแล้ว (เขียว) */
+.field.need input, .field.need textarea { border: 2px solid var(--danger); }
+.field.need .need-tag { color: var(--danger); font-size: 12px; font-weight: 600; }
+.field.need.ok input, .field.need.ok textarea { border-color: var(--accent); }
+.field.need.ok .need-tag { color: var(--accent); }
