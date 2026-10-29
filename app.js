@@ -28,7 +28,7 @@
     not_configured: 'ระบบยังตั้งค่าไม่ครบ (LINE_LOGIN_CHANNEL_ID) แจ้งผู้ดูแล',
     not_found: 'ไม่พบงานนี้', bad_status: 'สถานะไม่ถูกต้อง', past_date: 'วันตามต้องเป็นวันนี้หรือหลังจากนี้',
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
-    already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
+    already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', not_found_part: 'ไม่พบรายการถอดอะไหล่นี้', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
     unknown_action: 'ระบบยังไม่รองรับคำสั่งนี้ (อาจยังไม่ได้ deploy)', nothing_selected: 'ยังไม่ได้เลือกข้อ', not_in_job: 'ข้อความนี้ไม่ได้อยู่ในงานนี้แล้ว (มีคนย้ายไปก่อน) โหลดหน้าใหม่',
     same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน',
     need_fix_note: 'ปิดงานต้องใส่สรุปการแก้ไข (อย่างน้อย 10 ตัวอักษร)', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
@@ -1142,25 +1142,35 @@
     });
     const many = items.length > 1;
     sheet('<h2>' + (many ? 'แนบ ' + items.length + ' ข้อเข้างานเดียวกัน' : 'แนบเข้างานเดิม') + '</h2>' +
-      // ค้นงานตรงนี้เลย (เหมือนแท็บค้นหา) ไม่ต้องออกไปค้นแล้วกลับมา
-      '<div class="field"><span class="lbl">🔍 ค้นงาน</span><div class="search-row"><input class="search" id="f-q" type="search" enterkeyhint="search" ' +
-      'placeholder="ชื่อลูกค้า เบอร์ รุ่น SN หรือคำในแชท"><button type="button" class="btn" id="f-go">ค้นหา</button></div><div id="f-res"></div></div>' +
-      '<label class="field">เลขงาน' +
-      (opts.length ? '<select id="f-pick">' + opts.map(o => '<option value="' + esc(o.no) + '">' + esc(o.label) + '</option>').join('') +
-        '<option value="">พิมพ์เลขงานเอง…</option></select>' : '') +
+      // ค้นงานตรงนี้เลย (เหมือนแท็บค้นหา) ไม่ต้องออกไปค้นแล้วกลับมา · เจอรายการถอดอะไหล่ด้วย (P-0003)
+      '<div class="field"><span class="lbl">🔍 ค้นงาน / อะไหล่</span><div class="search-row"><input class="search" id="f-q" type="search" enterkeyhint="search" ' +
+      'placeholder="ชื่อลูกค้า เบอร์ รุ่น SN P-0003 หรือคำในแชท"><button type="button" class="btn" id="f-go">ค้นหา</button></div><div id="f-res"></div></div>' +
+      // คุยเรื่องอะไหล่ที่ถอด (ก่อน/หลังบันทึก) → แนบเข้ารายการ P-xxxx ได้ (ผู้ใช้ 29 ต.ค. 2569)
+      '<label class="field">เลขงาน / รายการถอดอะไหล่<select id="f-pick">' + opts.map(o => '<option value="' + esc(o.no) + '">' + esc(o.label) + '</option>').join('') +
+        '<option value="">พิมพ์เลขงานเอง…</option></select>' +
       '<input id="f-job" inputmode="numeric" placeholder="เช่น 131"' + (opts.length ? ' hidden' : '') + '></label>' +
       '<label class="field">สถานะ<select id="f-status">' + statusOptions(statuses, many ? '' : items[0].status, true) + '</select></label>' + reviewNoteField +
       '<div class="actions"><button class="btn primary" id="f-ok">แนบ</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       const pick = el.querySelector('#f-pick');
       const input = el.querySelector('#f-job');
-      if (pick) pick.onchange = () => { input.hidden = !!pick.value; };
+      pick.onchange = () => { input.hidden = !!pick.value; };
+      // รายการถอดอะไหล่ที่ยังไม่ใส่คืน ต่อท้ายรายการเลือก (โหลดครั้งเดียว เก็บไว้ใน state.parts เหมือนแท็บอะไหล่)
+      const addParts = list => {
+        if (!list.length || pick.querySelector('optgroup')) return;
+        const g = document.createElement('optgroup');
+        g.label = '🔧 ถอดอะไหล่ (ยังไม่ใส่คืน)';
+        list.forEach(p => g.appendChild(new Option(p.no + ' ' + partName(p) + (p.customer ? ' · ' + p.customer : ''), p.no)));
+        const cur = pick.value;   // ใส่กลุ่มใหม่แล้วตัวที่เลือกอยู่ต้องไม่เปลี่ยน
+        pick.insertBefore(g, pick.lastChild);
+        pick.value = cur;
+      };
+      if (state.parts) addParts(state.parts.open);
+      else core('parts').then(d => { state.parts = d; addParts(d.open); }).catch(() => {});
       const q = el.querySelector('#f-q'), res = el.querySelector('#f-res');
-      const choose = (no, label) => { // เลือกจากผลค้น → ใส่เป็นเลขงานที่จะแนบ
-        if (pick) {
-          let o = [...pick.options].find(x => x.value === no);
-          if (!o) { o = new Option(label, no); pick.insertBefore(o, pick.firstChild); }
-          pick.value = no; input.hidden = true;
-        } else input.value = noDigits(no);
+      const choose = (no, label) => { // เลือกจากผลค้น → ใส่เป็นเลขงาน/รายการที่จะแนบ
+        let o = [...pick.options].find(x => x.value === no);
+        if (!o) { o = new Option(label, no); pick.insertBefore(o, pick.firstChild); }
+        pick.value = no; input.hidden = true;
         res.querySelectorAll('.res-job').forEach(b => b.classList.toggle('on', b.dataset.no === no));
       };
       const go = async () => {
@@ -1169,23 +1179,26 @@
         res.innerHTML = '<div class="muted small">กำลังค้น…</div>';
         try {
           const out = await core('search', { q: v });
-          const jobs = out.jobs.slice(0, 8);
-          res.innerHTML = jobs.length ? jobs.map(j => {
+          const jobs = out.jobs.slice(0, 8), parts = (out.parts || []).slice(0, 5);
+          res.innerHTML = parts.map(p => '<button type="button" class="res-job" data-no="' + esc(p.no) + '" data-label="' + esc(p.no + ' ' + partName(p)) + '">🔧 <b>' + esc(p.no) + '</b> ' +
+            esc(partName(p)) + ' <span class="pill">' + esc(p.status) + '</span><div class="muted small">' + esc(['จาก ' + (partDonor(p) || '-'), p.job && '→ ' + p.job, p.customer].filter(Boolean).join(' · ')) +
+            '</div></button>').join('') + (jobs.length || parts.length ? jobs.map(j => {
             const no = j.merged || j.no;
             return '<button type="button" class="res-job" data-no="' + esc(no) + '" data-label="' + esc(no + ' ' + j.title) + '"><b>' + esc(no) + '</b> ' + esc(j.title) +
               ' <span class="pill ' + ph(j.status) + '">' + esc(shortStatus(j.status)) + '</span><div class="muted small">' + esc([j.customer, j.phone, 'เปิด ' + fmtDate(j.opened)].filter(Boolean).join(' · ')) +
               (j.merged ? ' · รวมเข้า ' + esc(j.merged) : '') + '</div></button>';
-          }).join('') : '<div class="muted small">ไม่พบงานที่ตรงกับ "' + esc(v) + '"</div>';
+          }).join('') : '<div class="muted small">ไม่พบงานที่ตรงกับ "' + esc(v) + '"</div>');
           res.querySelectorAll('.res-job').forEach(b => b.onclick = () => choose(b.dataset.no, b.dataset.label));
         } catch (err) { if (err.message !== 'login') res.innerHTML = '<div class="small">⚠️ ' + esc(err.message) + '</div>'; }
       };
       el.querySelector('#f-go').onclick = go;
       q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
       el.querySelector('#f-ok').onclick = e => {
-        const job = (pick && pick.value) || input.value.trim();
+        const job = pick.value || input.value.trim();
         if (!job) { toast('ใส่เลขงานก่อน'); return; }
         busy(e.target);
-        const choice = { decision: 'attach', job, status: el.querySelector('#f-status').value, note: el.querySelector('#f-note').value.trim() };
+        const status = el.querySelector('#f-status').value, note = el.querySelector('#f-note').value.trim();
+        const choice = /^p/i.test(job) ? { decision: 'part', part: job, status, note } : { decision: 'attach', job, status, note };
         if (many) decideMany(choice); else decide(items[0], choice, null);
       };
     });
@@ -1488,9 +1501,9 @@
     claim(); // หน้าค้นหาวาดทันที แต่ต้องยกเลิกหน้าที่ยังโหลดค้างอยู่
     const q = state.searchQ || '';
     $app.innerHTML = '<div class="toolbar"><div class="search-row"><input class="search" id="sq" type="search" enterkeyhint="search" ' +
-      'placeholder="ชื่อ เบอร์ รุ่น SN จังหวัด หรือคำในแชท" value="' + esc(q) + '"><button class="btn primary" id="sgo">ค้นหา</button></div>' +
+      'placeholder="ชื่อ เบอร์ รุ่น SN จังหวัด P-0003 หรือคำในแชท" value="' + esc(q) + '"><button class="btn primary" id="sgo">ค้นหา</button></div>' +
       '<label class="btn" id="simg-l">📷 ค้นด้วยรูป (ป้ายเครื่อง/SN/นามบัตร)<input type="file" id="simg" accept="image/*" hidden></label></div><div id="sres">' +
-      (state.searchHtml || '<div class="center muted">ค้นประวัติจากทุกงานและแชทเก่า</div>') + '</div>';
+      (state.searchHtml || '<div class="center muted">ค้นประวัติจากทุกงาน รายการถอดอะไหล่ และแชทเก่า</div>') + '</div>';
     const input = document.getElementById('sq');
     const go = async () => {
       const v = input.value.trim();
@@ -1524,8 +1537,14 @@
 
   function drawResults(out, q, head) {
     let html = head || '';
-    if (!out.jobs.length && !out.loose.length) html += '<div class="center muted">ไม่พบ "' + esc(q) + '"</div>';
-    if (out.jobs.length) html += '<div class="muted small">งานที่เกี่ยวข้อง ' + out.jobs.length + ' งาน</div>';
+    const parts = out.parts || [];
+    if (!out.jobs.length && !out.loose.length && !parts.length) html += '<div class="center muted">ไม่พบ "' + esc(q) + '"</div>';
+    // รายการถอดอะไหล่ (P-0003 / ชื่ออะไหล่ / SN เครื่องที่ถอด) ขึ้นก่อนงานซ่อม — ค้นช่องเดียวเจอทั้งคู่ ไม่ต้องเลือกก่อน
+    if (parts.length) html += '<div class="muted small">รายการถอดอะไหล่ ' + parts.length + ' รายการ</div>' + parts.map(p => '<a class="card part-card ' + PART_LEVEL[p.level][2] +
+      '" href="#part/' + p.id + '"><div class="top"><span class="no">🔧 ' + esc(p.no) + '</span><span class="title">' + esc(partName(p)) + '</span><span class="age">' + esc(p.status) +
+      '</span></div><div class="meta"><span>จาก ' + esc(partDonor(p) || '-') + '</span>' + (p.job ? '<span>→ ' + esc(p.job) + '</span>' : '') + (p.customer ? '<span>' + esc(p.customer) + '</span>' : '') +
+      '<span>ถอด ' + esc(fmtMs(p.time)) + ' · ' + esc(p.by) + '</span></div></a>').join('');
+    if (out.jobs.length) html += '<div class="muted small"' + (parts.length ? ' style="margin-top:12px"' : '') + '>งานที่เกี่ยวข้อง ' + out.jobs.length + ' งาน</div>';
     out.jobs.forEach(j => {
       const target = j.merged || j.no;
       html += '<a class="card ' + ph(j.status) + '" href="#job/' + noDigits(target) + '"><div class="top"><span class="no">' + esc(j.no) + '</span><span class="title">' +
@@ -1841,10 +1860,14 @@
       (open ? '<button class="btn' + (p.status === 'อะไหล่มาแล้ว' ? ' primary' : '') + '" data-to="done">✅ ใส่คืนแล้ว</button><button class="btn danger" data-to="cancel">ยกเลิกรายการ</button>'
         : '<button class="btn" data-to="reopen">↩︎ เปิดใหม่</button>') + '</div>';
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ต เช่น สั่งอะไหล่แล้ว PO 123 คาดว่ามา 15 พ.ย."></textarea><button class="btn primary" id="save-note">บันทึก</button></div>';
-    html += '<h3>ไทม์ไลน์</h3><ul class="timeline">' + data.events.map(ev => '<li class="' + (ev.kind === 'ใส่คืนแล้ว' ? 'k-fix' : ev.kind === 'อะไหล่มาแล้ว' ? 'k-status' : ev.kind === 'ถอด' ? 'k-open' : '') +
+    const timeline = data.events.concat(data.msgs || []).sort((a, b) => a.time - b.time);
+    html += '<h3>ไทม์ไลน์</h3><ul class="timeline">' + timeline.map(ev => ev.msg ? eventHtml(ev) : '<li class="' + (ev.kind === 'ใส่คืนแล้ว' ? 'k-fix' : ev.kind === 'อะไหล่มาแล้ว' ? 'k-status' : ev.kind === 'ถอด' ? 'k-open' : '') +
       '"><div class="when">' + esc(fmtDateTime(new Date(ev.time).toISOString())) + '</div><div class="what">' + esc(ev.kind) + ' <span class="muted small">โดย ' + esc(ev.by) + '</span></div>' +
       (ev.detail ? '<div class="text">' + esc(ev.detail) + '</div>' : '') + '</li>').join('') + '</ul>';
+    if (!(data.msgs || []).length) html += '<p class="muted small">มีคุยเรื่องอะไหล่นี้ในกลุ่ม → คิวตรวจ กด "📎 แนบงานเดิม" แล้วเลือก ' + esc(p.no) + '</p>';
     $app.innerHTML = html;
+    loadThumbs();
+    $app.querySelectorAll('[data-media]').forEach(el => el.onclick = () => openMedia({ msgId: el.dataset.media, type: el.dataset.mtype, full: el.dataset.full }));
     $app.querySelectorAll('[data-pkey]').forEach(el => el.onclick = () => openMedia({ key: el.dataset.pkey, type: /\.(mp4|mov)$/.test(el.dataset.pkey) ? 'video' : 'image', full: el.dataset.url }));
     const TITLE = { arrived: '📦 อะไหล่มาแล้ว', done: '✅ ใส่อะไหล่คืนเครื่องแล้ว', cancel: 'ยกเลิกรายการ', reopen: 'เปิดรายการใหม่' };
     const HINT = { arrived: 'จ๊อบจะทักบอก ' + p.by + ' ให้ไปเบิกจากสโตร์มาใส่คืน', done: 'ใส่คืนที่ ' + partDonor(p) + ' แล้ว (เครื่องนี้ขายได้แล้ว)',
@@ -1980,10 +2003,9 @@
       try {
         const out = await core('createPart', { part: Object.assign({}, partForm, { files: partForm.files.filter(f => f.key).map(f => f.key),
           note: partForm.reviewText ? 'จากแชทกลุ่ม: ' + partForm.reviewText : '' }) });
-        if (partForm.fromReview) { // ข้อในคิวตรวจที่มาจากแชทนี้ ออกจากคิว (บันทึกเบื้องหลัง)
-          const items = partForm.fromReview, job = String(partForm.jobNo || '').trim();
-          queueSave(items, () => api('decideMany', Object.assign({ items }, job ? { decision: 'attach', job, status: '' } : { decision: 'notjob' })),
-            () => 'คิวตรวจ: ' + (job ? 'แนบเข้างาน #' + job.padStart(4, '0') : 'ไม่เกี่ยวกับงานซ่อม'));
+        if (partForm.fromReview) { // ข้อในคิวตรวจที่มาจากแชทนี้ → เข้ารายการใหม่ (รายการผูกงาน = เข้างานนั้นด้วย) · บันทึกเบื้องหลัง
+          const items = partForm.fromReview;
+          queueSave(items, () => api('decideMany', { items, decision: 'part', part: out.no, status: '' }), () => 'คิวตรวจ: แนบข้อความเข้า ' + out.no);
         }
         partForm.files.forEach(f => URL.revokeObjectURL(f.url));
         Object.keys(partForm).forEach(k => delete partForm[k]); partForm.files = [];
