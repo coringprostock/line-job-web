@@ -415,7 +415,14 @@
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ตลงไทม์ไลน์ เช่น โทรแล้วลูกค้าไม่รับ"></textarea>' +
       '<button class="btn primary" id="save-note">บันทึก</button></div>';
 
-    html += '<h3>ไทม์ไลน์</h3><p class="muted small">ข้อความหรือรูปที่ไม่ใช่ของงานนี้ ติ๊กแล้วย้ายไปงานที่ถูก หรือเอาออกได้</p><ul class="timeline">';
+    // แยกแชทจริงกับสถานะ/การทำงาน (ผู้ใช้ 29 ต.ค. 2569): หน้าตาต่างกัน + กรองดูอย่างเดียวได้ (จำค่าไว้ในเครื่อง)
+    const nChat = data.events.filter(ev => evType(ev) === 'chat').length;
+    const tl = tlFilter();
+    const seg = (k, l) => '<button class="seg' + (tl === k ? ' on' : '') + '" data-tl="' + k + '">' + l + '</button>';
+    html += '<h3>ไทม์ไลน์</h3><div class="segs tl-filter">' + seg('all', 'ทั้งหมด') + seg('chat', '💬 แชท (' + nChat + ')') +
+      seg('act', '📋 สถานะ/บันทึก (' + (data.events.length - nChat) + ')') + '</div>' +
+      '<p class="muted small">💬 = ข้อความจริงในแชท (ชื่อคนส่ง + เวลาที่ส่ง) · แถวเทาเล็ก = ระบบ/คนตรวจทำกับงาน · ข้อความหรือรูปที่ไม่ใช่ของงานนี้ ติ๊กแล้วย้ายไปงานที่ถูก หรือเอาออกได้</p>' +
+      '<ul class="timeline' + (tl === 'all' ? '' : ' only-' + tl) + '" id="tl">';
     data.events.forEach(ev => { html += eventHtml(ev); });
     html += '</ul><div class="bulk-spacer"></div>';
     $app.innerHTML = html;
@@ -428,6 +435,11 @@
       drawMoveBar();
     });
 
+    $app.querySelectorAll('[data-tl]').forEach(b => b.onclick = () => {
+      tlFilter(b.dataset.tl);
+      $app.querySelectorAll('[data-tl]').forEach(x => x.classList.toggle('on', x === b));
+      document.getElementById('tl').className = 'timeline' + (b.dataset.tl === 'all' ? '' : ' only-' + b.dataset.tl);
+    });
     const cur = $app.querySelector('.step.current');
     if (cur) cur.scrollIntoView({ inline: 'center', block: 'nearest' });
     $app.querySelectorAll('.step').forEach(btn => btn.onclick = () => statusSheet(data, btn.dataset.status));
@@ -508,16 +520,33 @@
     dl.onclick = () => { if (window.liff && liff.isInClient && liff.isInClient()) liff.openWindow({ url: m.download, external: true }); else window.open(m.download, '_blank'); };
   }
 
+  // ไทม์ไลน์: chat = ข้อความจริงจากแชท · note = โน้ต/สรุปที่คนเขียน · act = ระบบ/คนตรวจทำกับงาน (แถวเทาเล็ก)
+  const NOTE_KINDS = ['โน้ต', 'สรุปการแก้ไข'];
+  const ACT_ICON = { 'เปลี่ยนสถานะ': '🔄', 'เปิดงาน': '🆕', 'แนบข้อความ': '📎', 'รับข้อความ': '📎', 'ย้ายออก': '↪️', 'ย้ายข้อความ': '↪️', 'รวมงาน': '🔗',
+    'AI เติมข้อมูลงาน': '🤖', 'แก้ชื่องาน': '✏️', 'แก้ข้อมูลงาน': '✏️', 'เอาออก': '🗑', 'เอาข้อความออก': '🗑', 'ตั้งวันตาม': '⏰', 'แยกงาน': '✂️', 'แยกข้อความ': '✂️', 'เพิ่มรูป': '🖼' };
+  const evType = ev => ev.msg ? 'chat' : NOTE_KINDS.includes(ev.kind) ? 'note' : 'act';
+  function tlFilter(set) {
+    try { if (set) localStorage.setItem('tlFilter', set); return localStorage.getItem('tlFilter') || 'all'; } catch { return set || 'all'; }
+  }
+
   function eventHtml(ev) {
-    const kindClass = ev.kind === 'เปลี่ยนสถานะ' ? 'k-status' : ev.kind === 'เปิดงาน' ? 'k-open' : ev.kind === 'สรุปการแก้ไข' ? 'k-fix' : '';
+    const type = evType(ev);
+    if (type === 'act') {
+      // แนบข้อความ = เวลาที่คนตรวจกด ไม่ใช่เวลาคุย → บอกให้ชัด
+      const when = ev.kind === 'แนบข้อความ' ? 'ตรวจเมื่อ ' + fmtDateTime(ev.time) : fmtDateTime(ev.time);
+      return '<li class="ev-act' + (ev.kind === 'เปลี่ยนสถานะ' ? ' k-status' : ev.kind === 'เปิดงาน' ? ' k-open' : '') + '"><div class="act-line">' + (ACT_ICON[ev.kind] || '⚙️') + ' <b>' + esc(ev.kind) + '</b>' +
+        (ev.detail ? ' <span class="act-detail">' + esc(ev.detail) + '</span>' : '') + '</div><div class="act-meta">' + esc(ev.by || 'ระบบ') + ' · ' + esc(when) +
+        (ev.job && ev.job !== (state.currentJob || ev.job) ? ' · ' + esc(ev.job) : '') + '</div></li>';
+    }
     let body = '';
     if (ev.msg) {
-      body += '<div class="what">' + esc(ev.msg.sender) + '</div>';
+      body += '<div class="what">💬 ' + esc(ev.msg.sender) + '</div>';
       if (ev.msg.type === 'text') body += '<div class="text">' + esc(ev.msg.text) + '</div>';
     } else {
-      body += '<div class="what">' + esc(ev.kind) + ' <span class="muted small">โดย ' + esc(ev.by) + '</span></div>';
+      body += '<div class="what">📝 ' + esc(ev.kind) + ' <span class="muted small">โดย ' + esc(ev.by) + '</span></div>';
       if (ev.detail) body += '<div class="text">' + esc(ev.detail) + '</div>';
     }
+    const kindClass = type === 'chat' ? 'ev-chat' : 'ev-note' + (ev.kind === 'สรุปการแก้ไข' ? ' k-fix' : '');
     if (ev.media) {
       // แตะรูป/คลิป/ไฟล์ = เปิดไฟล์จริง (Worker เก็บไว้ใน R2) + ปุ่มดาวน์โหลด
       const tap = ' data-media="' + esc(ev.msgId) + '" data-mtype="' + esc(ev.media.type) + '" data-full="' + esc(ev.media.full || '') + '"';
