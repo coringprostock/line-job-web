@@ -1592,35 +1592,45 @@
     setTab('board');
     const v = intake;
     const opt = (list, cur) => '<option value=""></option>' + list.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
-    $app.innerHTML = '<form id="nf" class="intake" autocomplete="off">' +
-      '<div class="field"><span class="lbl">รูป / คลิป <b class="req">*</b></span><div class="files" id="files"></div>' +
-      '<label class="btn"><input type="file" id="fpick" accept="image/*,video/*" multiple hidden>＋ ถ่าย / เลือกรูป คลิป</label></div>' +
-      '<p class="muted small">เปิดงานเร็ว: บังคับแค่ รูป + ชื่อลูกค้าหรือเบอร์ + SN · อาการ/ข้อมูลอื่น เติมทีหลังในหน้างานได้ (ปิดงานต้องครบ)</p>' +
-      '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน <b class="req">*</b> <span class="muted small">(หรือเบอร์)</span></span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
-      '<label class="field"><span class="lbl">เบอร์ลูกค้า <b class="req">*</b> <span class="muted small">(หรือชื่อ)</span></span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label>' +
-      '<div id="dup"></div>' +
-      '<label class="field"><span class="lbl">อาการ / สิ่งที่ลูกค้าแจ้ง <span class="muted small">(เติมทีหลังได้)</span></span><textarea name="symptom" rows="3">' + esc(v.symptom || '') + '</textarea></label>' +
-      '<label class="field"><span class="lbl">สินค้า / รุ่น</span><input name="product" list="plist" value="' + esc(v.product || '') + '"><datalist id="plist">' +
-        PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>' +
-      '<div class="field"><span class="lbl">SN / เลขเครื่อง <b class="req">*</b></span>' +
-        '<input name="serial" value="' + esc(v.serial || '') + '">' +
-        '<label class="btn"><input type="file" id="plate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่อง / เนมเพลท ให้ AI อ่าน SN</label>' +
+    // ฟอร์มเป็นข้อ 1–5 มีเส้นไทม์ไลน์ด้านซ้าย (ผู้ใช้ 30 ต.ค. 2569 · กดเมนู "แจ้งงานซ่อม" เปิดหน้านี้) · ข้อที่กำลังกรอก = กรอบส้ม · ครบ = เขียว ✓
+    // ชื่อช่อง (name) เดิมทั้งหมด → keep/submitJob ใช้ได้เหมือนเดิม
+    const step = (k, title, req, inner) => '<section class="nstep" data-step="' + k + '"><div class="nstep-dot">' + k + '</div><div class="nstep-body">' +
+      '<div class="nstep-head"><b>' + title + '</b>' + (req ? ' <b class="req">*</b>' : ' <span class="muted small">(เติมทีหลังได้)</span>') +
+      '<span class="nstep-state"></span></div>' + inner + '</div></section>';
+    const mic = name => SPEECH ? '<button type="button" class="btn mic" data-mic="' + name + '">🎤 พูด</button>' : '';
+    $app.innerHTML = '<form id="nf" class="intake steps" autocomplete="off">' +
+      '<div class="nsteps-top"><b>แจ้งงานซ่อม</b> <span id="nprog" class="muted small"></span></div>' +
+      step(1, '📷 รูปเครื่อง / คลิป', true, '<div class="files" id="files"></div>' +
+        '<label class="btn step-btn"><input type="file" id="fpick" accept="image/*,video/*" multiple hidden>📷 ถ่าย / เลือกรูป คลิป</label>') +
+      step(2, '🏷️ ป้ายเครื่อง / SN', true,
+        '<label class="btn step-btn"><input type="file" id="plate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่อง ให้ AI อ่าน SN</label>' +
         '<div class="muted small" id="plate-out"></div>' +
+        '<input name="serial" value="' + esc(v.serial || '') + '">' +
         '<select name="plateState">' + [['', 'ป้ายอ่านได้ครบ'], ['damaged', 'ป้ายชำรุด / เลขเลือน ขาดบางตัว'], ['none', 'เครื่องไม่มีป้าย / ป้ายหาย']]
-          .map(o => '<option value="' + o[0] + '"' + (o[0] === (v.plateState || '') ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></div>' +
-      '<label class="field"><span class="lbl">ที่อยู่</span><textarea name="address" rows="2">' + esc(v.address || '') + '</textarea></label>' +
-      '<label class="field"><span class="lbl">จังหวัด</span><select name="province">' + opt(PROVINCES, v.province) + '</select></label>' +
-      '<div class="field"><span class="lbl">ตำแหน่ง</span><div class="search-row"><button type="button" class="btn" id="geo">📍 ตำแหน่งปัจจุบัน</button>' +
+          .map(o => '<option value="' + o[0] + '"' + (o[0] === (v.plateState || '') ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+        '<label class="field"><span class="lbl">สินค้า / รุ่น</span><input name="product" list="plist" value="' + esc(v.product || '') + '"><datalist id="plist">' +
+          PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>') +
+      step(3, '👤 ลูกค้า', true, '<p class="muted small">ใส่ชื่อ หรือเบอร์ อย่างน้อยหนึ่งอย่าง</p>' +
+        '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน</span><div class="search-row"><input name="customer" value="' + esc(v.customer || '') + '">' + mic('customer') + '</div></label>' +
+        '<label class="field"><span class="lbl">เบอร์ลูกค้า</span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label><div id="dup"></div>') +
+      step(4, '🛠️ อาการ / สิ่งที่ลูกค้าแจ้ง', false, '<div class="search-row"><textarea name="symptom" rows="3">' + esc(v.symptom || '') + '</textarea>' + mic('symptom') + '</div>' +
+        (SPEECH ? '' : '<p class="muted small">🎤 ขี้เกียจพิมพ์: กดไมค์บนคีย์บอร์ดมือถือ แล้วพูดแทนได้</p>')) +
+      step(5, '📍 ที่อยู่ / หมุด', false,
+        '<label class="check"><input type="checkbox" name="atShop"' + (v.atShop ? ' checked' : '') + '> เครื่องอยู่ที่ศูนย์แล้ว</label>' +
+        '<div class="search-row"><button type="button" class="btn" id="geo">📍 ตำแหน่งปัจจุบัน</button>' +
         '<input name="mapUrl" placeholder="หรือวางลิงก์ Google Maps" value="' + esc(v.mapUrl || '') + '"></div><div class="muted small" id="geo-out">' +
-        (v.lat ? 'ปักหมุดแล้ว ' + v.lat.toFixed(5) + ', ' + v.lng.toFixed(5) : '') + '</div></div>' +
-      '<label class="check"><input type="checkbox" name="atShop"' + (v.atShop ? ' checked' : '') + '> เครื่องอยู่ที่ศูนย์</label>' +
+        (v.lat ? 'ปักหมุดแล้ว ' + v.lat.toFixed(5) + ', ' + v.lng.toFixed(5) : '') + '</div>' +
+        '<label class="field"><span class="lbl">ที่อยู่</span><textarea name="address" rows="2">' + esc(v.address || '') + '</textarea></label>' +
+        '<label class="field"><span class="lbl">จังหวัด</span><select name="province">' + opt(PROVINCES, v.province) + '</select></label>') +
       '<label class="check"><input type="checkbox" name="sendCard"' + (v.sendCard === false ? '' : ' checked') + '> ส่งการ์ดงานเข้ากลุ่มช่าง</label>' +
       '<div id="attach-note"></div><button class="btn primary wide" id="nsubmit">เปิดงาน</button></form>';
     const form = document.getElementById('nf');
     const keep = () => { const fd = new FormData(form); ['symptom', 'phone', 'customer', 'product', 'serial', 'address', 'province', 'mapUrl'].forEach(k => { intake[k] = fd.get(k); });
       intake.atShop = form.atShop.checked; intake.sendCard = form.sendCard.checked; intake.plateState = form.plateState.value; };
-    form.oninput = keep;
-    form.plateState.onchange = () => { keep(); drawPlateState(); };
+    form.oninput = () => { keep(); drawSteps(); };
+    form.onchange = () => { keep(); drawSteps(); };
+    form.plateState.onchange = () => { keep(); drawPlateState(); drawSteps(); };
+    form.querySelectorAll('[data-mic]').forEach(b => b.onclick = () => listen(b, form[b.dataset.mic]));
     drawPlateState();
     document.getElementById('plate').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) readPlate(f); };
     drawFiles();
@@ -1633,10 +1643,51 @@
       navigator.geolocation.getCurrentPosition(p => {
         intake.lat = p.coords.latitude; intake.lng = p.coords.longitude;
         out.textContent = 'ปักหมุดแล้ว ' + intake.lat.toFixed(5) + ', ' + intake.lng.toFixed(5) + ' (±' + Math.round(p.coords.accuracy) + ' ม.)';
+        drawSteps();
       }, () => { out.textContent = 'หาตำแหน่งไม่ได้ (ต้องอนุญาตตำแหน่งให้ LINE)'; }, { enableHighAccuracy: true, timeout: 15000 });
     };
     form.phone.onblur = checkPhone;
     form.onsubmit = submitJob;
+    drawSteps();
+  }
+
+  // ข้อไหนครบ → จุดเขียว ✓ · ข้อแรกที่ยังไม่ครบ = กรอบส้ม (กำลังกรอก) · ข้อ 1–3 บังคับ
+  const STEP_OK = {
+    1: f => intake.files.some(x => x.key),
+    2: f => { const sn = serialOf(f); return !!sn && !(sn.includes('?') && !sn.startsWith('ป้ายชำรุด')); },
+    3: f => !!String(f.customer.value).trim() || String(f.phone.value).replace(/\D/g, '').length >= 9,
+    4: f => !!String(f.symptom.value).trim(),
+    5: f => f.atShop.checked || !!intake.lat || !!String(f.mapUrl.value).trim() || !!String(f.address.value).trim() || !!f.province.value
+  };
+  function drawSteps(scroll) {
+    const form = document.getElementById('nf');
+    if (!form || !form.classList.contains('steps')) return;
+    let active = 0, need = 0;
+    form.querySelectorAll('.nstep').forEach(sec => {
+      const k = Number(sec.dataset.step), ok = STEP_OK[k](form);
+      if (!ok && !active) active = k;
+      if (k <= 3 && ok) need++;
+      sec.classList.toggle('ok', ok);
+      sec.classList.toggle('on', !ok && active === k);
+      sec.querySelector('.nstep-dot').textContent = ok ? '✓' : k;
+      sec.querySelector('.nstep-state').textContent = ok ? '✓ ได้แล้ว' : active === k ? '👉 กรอกข้อนี้' : '';
+    });
+    document.getElementById('nprog').textContent = need === 3 ? '✅ ข้อบังคับครบแล้ว กดเปิดงานได้' : 'ข้อบังคับ ' + need + '/3';
+    document.getElementById('nsubmit').classList.toggle('ready', need === 3);
+    // ถ่ายรูป/อ่านป้ายเสร็จ → เลื่อนไปข้อถัดไปให้ (ตอนพิมพ์ไม่เลื่อน กันจอกระโดด)
+    if (scroll && active) form.querySelector('.nstep[data-step="' + active + '"]').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // พูดแทนพิมพ์ (มีเฉพาะเครื่อง/เบราว์เซอร์ที่รองรับ · ไม่รองรับ = ใช้ไมค์บนคีย์บอร์ด)
+  const SPEECH = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function listen(btn, input) {
+    const r = new SPEECH();
+    r.lang = 'th-TH'; r.interimResults = false;
+    btn.textContent = '🔴 กำลังฟัง…';
+    r.onresult = e => { const t = e.results[0][0].transcript; input.value = (input.value ? input.value + ' ' : '') + t; input.dispatchEvent(new Event('input', { bubbles: true })); };
+    r.onerror = () => toast('ฟังไม่ได้ ลองกดไมค์บนคีย์บอร์ดแทน');
+    r.onend = () => { btn.textContent = '🎤 พูด'; };
+    try { r.start(); } catch { btn.textContent = '🎤 พูด'; }
   }
 
   // ป้ายชำรุด = ใส่เลขส่วนที่อ่านได้ (ถ้ามี) แล้วเปิดงานได้ · ไม่มีป้าย = ไม่ต้องใส่เลข
@@ -1666,6 +1717,7 @@
       if (!r.serial && !r.damaged) { out.textContent = '⚠️ AI ไม่เห็นป้ายเครื่องในรูปนี้ ถ่ายป้ายให้ชัดขึ้น หรือพิมพ์เอง'; return; }
       form.plateState.value = r.damaged ? 'damaged' : ''; intake.plateState = form.plateState.value; drawPlateState();
       form.serial.value = r.serial; intake.serial = r.serial;
+      setTimeout(() => drawSteps(true), 0);
       const model = r.product && r.model && !r.product.includes(r.model) ? r.product + ' ' + r.model : r.product || r.model;
       if (!form.product.value && model) { form.product.value = model; intake.product = model; }
       out.textContent = r.damaged ? '🏷️ AI: ป้ายชำรุด / เลขเลือน' + (r.serial ? ' อ่านได้บางส่วน ' + r.serial : ' อ่านเลขไม่ได้') + ' — เปิดงานได้ (ถ้าอ่านเองได้ แก้เลขแล้วเลือก "ป้ายอ่านได้ครบ")'
@@ -1678,7 +1730,7 @@
     intake.files.push(item);
     drawFiles();
     uploadFile(file).then(key => { item.key = key; item.state = ''; }).catch(err => { item.state = 'ส่งไม่สำเร็จ'; item.error = err.message; toast(err.message); })
-      .then(drawFiles);
+      .then(() => { drawFiles(); drawSteps(true); });
   }
 
   function drawFiles() {
@@ -1687,7 +1739,7 @@
     el.innerHTML = intake.files.map((f, i) => '<div class="file">' + (f.type === 'image' ? '<img src="' + f.url + '" alt="">' : '<div class="vid">🎬</div>') +
       (f.state ? '<span class="fstate' + (f.error ? ' bad' : '') + '">' + esc(f.state) + '</span>' : '') +
       '<button type="button" class="fdel" data-i="' + i + '" aria-label="ลบ">✕</button></div>').join('');
-    el.querySelectorAll('.fdel').forEach(b => b.onclick = () => { intake.files.splice(Number(b.dataset.i), 1); drawFiles(); });
+    el.querySelectorAll('.fdel').forEach(b => b.onclick = () => { intake.files.splice(Number(b.dataset.i), 1); drawFiles(); drawSteps(); });
   }
 
   async function checkPhone() {
@@ -1743,7 +1795,7 @@
         atShop: form.atShop.checked, sendCard: form.sendCard.checked, attachTo: intake.attachTo, files: intake.files.filter(f => f.key).map(f => f.key) };
       const out = await core('createJob', { job });
       const later = [!job.symptom.trim() && 'อาการ', !job.customer.trim() && 'ชื่อลูกค้า', String(job.phone).replace(/\D/g, '').length < 9 && 'เบอร์'].filter(Boolean);
-      const done = { no: out.no, url: out.url, card: out.card, print: out.print, attached: !!intake.attachTo, later,
+      const done = { no: out.no, url: out.url, card: out.card, print: out.print, dm: out.dm, attached: !!intake.attachTo, later,
         label: { no: out.no, model: job.product, symptom: job.symptom, customer: job.customer } };
       intake.files.forEach(f => URL.revokeObjectURL(f.url));
       Object.keys(intake).forEach(k => delete intake[k]);
@@ -1779,6 +1831,23 @@
   }
 
   function drawCreated(d) {
+    // เปิดจากเมนู "แจ้งงานซ่อม" ในแชทน้องจ๊อบ → แจ้งผล แล้วปิดหน้าเว็บกลับแชท (จ๊อบส่งการ์ดสรุปให้เป็นหลักฐาน · ผู้ใช้ 30 ต.ค. 2569)
+    if (state.fromMenu && !d.attached && window.liff && liff.isInClient && liff.isInClient()) {
+      state.fromMenu = false;
+      let timer = 0;
+      $app.innerHTML = '<div class="panel-box created"><div class="big-no">' + esc(d.no) + '</div><div>เปิดงานแล้ว</div><div class="actions"><a class="btn primary" href="#job/' +
+        noDigits(d.no) + '">เปิดหน้างาน</a><a class="btn" href="#new">เปิดงานอื่น</a></div></div>';
+      sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>เปิดงานเรียบร้อยแล้ว</h2><div class="big-no">' + esc(d.no) + '</div>' +
+        '<p>' + (d.dm ? 'จ๊อบส่งการ์ดสรุปงานให้ในแชทแล้ว' : 'งานเปิดแล้ว (ส่งการ์ดในแชทไม่สำเร็จ ดูงานได้ที่บอร์ด)') + (d.card ? ' · ส่งการ์ดเข้ากลุ่มหลักแล้ว' : '') + '</p>' +
+        (d.later && d.later.length ? '<p class="flag-due small">📝 ก่อนปิดงานต้องเติม: ' + esc(d.later.join(', ')) + '</p>' : '') +
+        '<p class="muted small" id="back-note">กำลังกลับไปที่แชท…</p>' +
+        '<div class="actions"><button class="btn primary" id="go-chat">กลับแชทเลย</button><a class="btn" href="#job/' + noDigits(d.no) + '">อยู่ต่อ ดูหน้างาน</a></div></div>', el => {
+        el.querySelector('#go-chat').onclick = () => liff.closeWindow();
+        el.querySelector('a.btn').onclick = () => { clearTimeout(timer); closeSheet(); };
+      });
+      timer = setTimeout(() => liff.closeWindow(), 2000);
+      return;
+    }
     $app.innerHTML = '<div class="panel-box created"><div class="big-no">' + esc(d.no) + '</div><div>' + (d.attached ? 'เพิ่มข้อมูลเข้างานแล้ว' : 'เปิดงานแล้ว') +
       (d.card ? ' · ส่งการ์ดเข้ากลุ่มแล้ว' : '') + (d.print ? ' · เข้าคิวพิมพ์ป้าย' : '') + '</div>' +
       '<div id="label-box"></div><div class="actions"><a class="btn primary" href="#job/' + noDigits(d.no) + '">เปิดหน้างาน</a>' +
@@ -2257,6 +2326,7 @@
       // เปิดเว็บครั้งแรกเข้าบอร์ดงานเสมอ (LINE อาจเปิด URL เดิมที่ค้างแท็บเก่าไว้ เช่น #stats)
       // ยกเว้นลิงก์ "เปิดหน้างาน" จากการ์ดในแชท (?job=0131) หรือ ?view=review
       const params = new URLSearchParams(location.search);
+      state.fromMenu = params.get('view') === 'new';   // เมนู "แจ้งงานซ่อม" → บันทึกแล้วกลับแชท
       const start = params.get('job') ? '#job/' + params.get('job').replace(/\D/g, '')
         : params.get('part') ? '#part/' + params.get('part').replace(/\D/g, '') : params.get('view') === 'parts' ? '#parts'
         : params.get('view') === 'review' ? '#review' : params.get('view') === 'new' ? '#new' : params.get('view') === 'search' ? '#search' : '#board';

@@ -414,3 +414,26 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .timeline.only-chat li:not(.ev-chat) { display: none; }
 .timeline.only-act li.ev-chat { display: none; }
 .timeline li.ev-chat.picked { background: var(--ph-start-bg); }
+
+/* ฟอร์มแจ้งงานซ่อมเป็นข้อ 1–5 + เส้นไทม์ไลน์ (ผู้ใช้ 30 ต.ค. 2569) · กำลังกรอก = ส้ม · ครบ = เขียว */
+.intake.steps { --step-on: #EA580C; }
+.nsteps-top { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 10px; font-size: 16px; }
+.nstep { position: relative; display: flex; gap: 10px; padding-bottom: 12px; }
+.nstep::before { content: ""; position: absolute; left: 15px; top: 32px; bottom: 0; width: 3px; background: var(--line); border-radius: 2px; }
+.nstep:last-of-type::before { display: none; }
+.nstep.ok::before { background: var(--accent); }
+.nstep-dot { flex: 0 0 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--chip); color: var(--muted); z-index: 1; }
+.nstep.on .nstep-dot { background: var(--step-on); color: #fff; box-shadow: 0 0 0 4px rgba(234, 88, 12, .2); }
+.nstep.ok .nstep-dot { background: var(--accent); color: #fff; }
+.nstep-body { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); display: flex; flex-direction: column; gap: 8px; }
+.nstep.on .nstep-body { border: 2px solid var(--step-on); }
+.nstep.ok .nstep-body { border-color: var(--accent); }
+.nstep-head { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.nstep-state { margin-left: auto; font-size: 12px; font-weight: 600; }
+.nstep.on .nstep-state { color: var(--step-on); }
+.nstep.ok .nstep-state { color: var(--accent); }
+.nstep .step-btn { align-self: flex-start; }
+.nstep.on .step-btn { background: var(--step-on); color: #fff; border-color: var(--step-on); }
+.nstep .field { margin: 0; }
+.btn.mic { flex: 0 0 auto; align-self: flex-start; }
+#nsubmit:not(.ready) { opacity: .6; }
