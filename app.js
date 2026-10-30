@@ -2318,6 +2318,21 @@
   });
   if (document.fonts) document.fonts.ready.then(fitTopbar);
 
+  // API key ใกล้หมดอายุ (Worker ส่งมาเฉพาะเจ้าของระบบ · keys.js) → ป้ายแดงบนสุดทุกหน้า กดปิดได้วันละครั้ง
+  function drawKeyAlerts(list) {
+    let seen = '';
+    try { seen = localStorage.getItem('keyAlertSeen') || ''; } catch { /* โหมดส่วนตัว */ }
+    const today = new Date().toISOString().slice(0, 10);
+    if (!list.length || seen === today || document.getElementById('key-alert')) return;
+    const el = document.createElement('div');
+    el.id = 'key-alert';
+    el.className = 'key-alert';
+    el.innerHTML = list.map(k => '🔑 <b>' + esc(k.name) + '</b> (' + esc(k.where) + ') ' + (k.days < 0 ? 'หมดอายุแล้ว' : k.days === 0 ? 'หมดอายุวันนี้' : 'หมดอายุอีก ' + k.days + ' วัน') +
+      (k.how ? '<div class="small">' + esc(k.how) + '</div>' : '')).join('<hr>') + '<button type="button" aria-label="ปิด">✕</button>';
+    el.querySelector('button').onclick = () => { try { localStorage.setItem('keyAlertSeen', today); } catch { /* ไม่เป็นไร */ } el.remove(); };
+    $app.parentNode.insertBefore(el, $app);
+  }
+
   async function start() {
     try {
       await liff.init({ liffId: CFG.LIFF_ID });
@@ -2338,7 +2353,7 @@
         if (a.getAttribute('href') === (location.hash || '#board')) { e.preventDefault(); route(); }
       }));
       route();
-      core('me').then(m => { setPartsBadge(m.partsBadge || 0); if (m.reviewCount !== undefined) setBadge(m.reviewCount); }).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน) · หลังย้าย: ป้ายคิวตรวจด้วย
+      core('me').then(m => { setPartsBadge(m.partsBadge || 0); if (m.reviewCount !== undefined) setBadge(m.reviewCount); drawKeyAlerts(m.keyAlerts || []); }).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน) · หลังย้าย: ป้ายคิวตรวจด้วย
       api('me').then(me => {
         state.me = me;
         // เวอร์ชันหน้าเว็บต่อท้ายชื่อ (ดูได้ว่ามือถือโหลดไฟล์ใหม่แล้วหรือยัง)

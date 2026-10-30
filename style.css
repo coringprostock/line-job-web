@@ -437,3 +437,8 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .nstep .field { margin: 0; }
 .btn.mic { flex: 0 0 auto; align-self: flex-start; }
 #nsubmit:not(.ready) { opacity: .6; }
+
+/* ป้ายเตือนต่ออายุ API key (เฉพาะเจ้าของระบบ) */
+.key-alert { position: relative; margin: 8px 16px 0; padding: 10px 36px 10px 12px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 14px; }
+.key-alert hr { border: 0; border-top: 1px solid rgba(255, 255, 255, .4); margin: 6px 0; }
+.key-alert button { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: #fff; font-size: 18px; cursor: pointer; }
