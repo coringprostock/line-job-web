@@ -1600,9 +1600,9 @@
     const mic = name => SPEECH ? '<button type="button" class="btn mic" data-mic="' + name + '">🎤 พูด</button>' : '';
     $app.innerHTML = '<form id="nf" class="intake steps" autocomplete="off">' +
       '<div class="nsteps-top"><b>แจ้งงานซ่อม</b> <span id="nprog" class="muted small"></span></div>' +
-      step(1, '📷 รูปเครื่อง / คลิป', true, '<div class="files" id="files"></div>' +
+      step(1, '📷 รูปเครื่อง / คลิป', true, '<p class="muted small">ถ่ายรูปตัวสินค้าให้เห็นทั้งเครื่อง: ด้านหน้า · ด้านหลัง · ด้านข้าง (+ จุดที่เสีย ถ้ามี)</p><div class="files" id="files"></div>' +
         '<label class="btn step-btn"><input type="file" id="fpick" accept="image/*,video/*" multiple hidden>📷 ถ่าย / เลือกรูป คลิป</label>') +
-      step(2, '🏷️ ป้ายเครื่อง / SN', true,
+      step(2, '🏷️ ป้ายเครื่อง / SN', true, '<p class="muted small">ถ่ายป้ายเนมเพลทให้เห็นทั้งสเปคและเลข SN ชัดที่สุด: ถ่ายตรงๆ ไม่เบลอ ไม่สะท้อนแสง</p>' +
         '<label class="btn step-btn"><input type="file" id="plate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่อง ให้ AI อ่าน SN</label>' +
         '<div class="muted small" id="plate-out"></div>' +
         '<input name="serial" value="' + esc(v.serial || '') + '">' +
