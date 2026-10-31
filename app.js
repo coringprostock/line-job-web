@@ -355,81 +355,175 @@
     $app.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { if (!b.dataset.day) return; state.dailyDay = b.dataset.day; drawDaily(); });
   }
 
-  // ---------- QR เข้าระบบเร็ว (ผู้ใช้ 31 ต.ค. 2569: หาแชทน้องจ๊อบในไลน์ไม่เจอ) · พิมพ์ติดผนัง/โต๊ะ หรือส่งให้คนใหม่ ----------
+  // ---------- QR เข้าระบบเร็ว (ผู้ใช้ 31 ต.ค. 2569: หาแชทน้องจ๊อบในไลน์ไม่เจอ) · โปสเตอร์ A4 ติดในแผนก ----------
+  // เปิดงาน = LIFF ?view=new (หน้าแจ้งงานซ่อม · บันทึกแล้วปิดกลับแชท) · ระบบ = LIFF เฉยๆ (บอร์ดงาน) · แชท = oaMessage ของน้องจ๊อบ
+  // โปสเตอร์สไตล์บัตรเข้างานกีฬาใหญ่ 2026 (ผู้ใช้ 31 ต.ค. 2569 · ไม่ใช้โลโก้/ถ้วย FIFA) · QR บนพื้นขาวขอบเงียบ ≥4 ช่อง
   const JOP_ID = '@696abybi';
-  function qrCanvas(url, title, sub) {
+  const QR_ITEMS = () => [
+    { key: 'new', url: 'https://liff.line.me/' + CFG.LIFF_ID + '?view=new', title: '📝 เปิด Job', sub: 'สแกนเปิดงานซ่อม · บันทึกแล้วน้องจ๊อบส่งการ์ดยืนยันในแชท',
+      en: 'OPEN JOB', th: 'เปิด Job', badge: 'สแกนเปิดงานซ่อม', pal: ['#FF4F12', '#E6007E', '#FFC400', '#1B1B3A'], code: 'CP-SVC-2026', fields: [['ACCESS', 'เปิดงาน'], ['ZONE', 'ทีมช่าง'], ['OPEN', '24 ชม.']],
+      steps: ['เปิดกล้องมือถือ หรือ LINE › สแกน QR', 'เข้าหน้าเปิดงานซ่อมทันที (ครั้งแรกกดอนุญาต)', 'ถ่ายรูปเครื่อง ป้าย SN ใส่ลูกค้า › กดบันทึก'] },
+    { key: 'jop', url: 'https://line.me/R/oaMessage/' + JOP_ID + '/', title: '💬 หลังบ้าน (น้องJob-ผู้ช่วยดูงาน)', sub: 'สแกนแล้วเข้าแชทน้องจ๊อบ คุย/ส่งรูปเปิดงาน และกดเมนูเข้าบอร์ดงาน (ยังไม่เป็นเพื่อน = เพิ่มเพื่อนก่อน)',
+      avatar: 'jop.jpg?v=51', en: 'JOB ASSISTANT', th: 'หลังบ้าน (น้องJob-ผู้ช่วยดูงาน)', badge: 'LINE ' + JOP_ID, pal: ['#00A651', '#00C9A7', '#FFD200', '#0B3B2E'], code: 'CP-BOT-2026', fields: [['NAME', 'น้องจ๊อบ'], ['LINE', JOP_ID], ['OPEN', '24 ชม.']],
+      steps: ['สแกน › เพิ่มเพื่อน › เข้าแชทน้องจ๊อบ', 'คุย ส่งรูป เล่าอาการ › น้องจ๊อบช่วยเปิดงาน', 'กดเมนูในแชท › บอร์ดงาน ค้นหา อะไหล่'] }];
+
+  const PW = 1240, PH = 1754;   // A4 ที่ 150 dpi
+  const TH = (w, px) => w + ' ' + px + 'px "Noto Sans Thai", sans-serif';
+  const EN = (w, px) => w + ' ' + px + 'px "Anton", "Noto Sans Thai", sans-serif';
+  function fitText(g, t, x, y, font, px, max, align) {
+    do { g.font = font(px); px -= 2; } while (g.measureText(t).width > max && px > 14);
+    g.textAlign = align || 'center'; g.fillText(t, x, y);
+  }
+  function spaced(g, t, cx, y, font, gap) {
+    g.font = font;
+    const w = [...t].reduce((a, ch) => a + g.measureText(ch).width + gap, -gap);
+    let x = cx - w / 2;
+    g.textAlign = 'left';
+    [...t].forEach(ch => { g.fillText(ch, x, y); x += g.measureText(ch).width + gap; });
+  }
+  function drawQr(g, url, x0, y0, box) {
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
-    const n = qr.getModuleCount(), cell = Math.floor(520 / n), size = cell * n, pad = 40;
-    const c = document.createElement('canvas');
-    c.width = size + pad * 2; c.height = size + pad * 2 + 120;
-    const g = c.getContext('2d');
-    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#000';
-    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect(pad + k * cell, pad + r * cell, cell, cell);
-    g.textAlign = 'center';
-    g.font = '700 40px "Noto Sans Thai", sans-serif'; g.fillText(title, c.width / 2, size + pad + 60);
-    g.font = '26px "Noto Sans Thai", sans-serif'; g.fillStyle = '#555'; g.fillText(sub, c.width / 2, size + pad + 100);
-    return c;
-  }
-  /** โปสเตอร์ A4 (1240×1754 = 150 dpi) ติดในแผนก ให้ทีมสแกนเข้าแชท/ระบบ */
-  async function posterCanvas(it) {
-    try { await document.fonts.load('700 60px "Noto Sans Thai"'); await document.fonts.load('400 40px "Noto Sans Thai"'); } catch { /* ใช้ฟอนต์เครื่อง */ }
-    const W = 1240, H = 1754, c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const g = c.getContext('2d'), F = (w, px) => w + ' ' + px + 'px "Noto Sans Thai", sans-serif';
-    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
-    g.fillStyle = '#06C755'; g.fillRect(0, 0, W, 210);
-    g.fillStyle = '#fff'; g.textAlign = 'center';
-    g.font = F(700, 84); g.fillText(it.poster.head, W / 2, 135);
-    g.fillStyle = '#111'; g.font = F(700, 64); g.fillText(it.poster.title, W / 2, 330);
-    const qr = qrcode(0, 'M'); qr.addData(it.url); qr.make();
-    const n = qr.getModuleCount(), cell = Math.floor(820 / n), size = cell * n, x0 = (W - size) / 2, y0 = 390;
+    const n = qr.getModuleCount(), cell = Math.floor(box / n), size = cell * n, off = Math.floor((box - size) / 2);
     g.fillStyle = '#000';
-    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect(x0 + k * cell, y0 + r * cell, cell, cell);
-    g.textAlign = 'left'; g.font = F(400, 40); g.fillStyle = '#222';
-    let y = y0 + size + 110;
-    it.poster.steps.forEach((t, i) => {
-      g.fillStyle = '#06C755'; g.beginPath(); g.arc(150, y - 14, 30, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#fff'; g.font = F(700, 36); g.textAlign = 'center'; g.fillText(String(i + 1), 150, y);
-      g.fillStyle = '#222'; g.font = F(400, 40); g.textAlign = 'left'; g.fillText(t, 205, y);
-      y += 85;
+    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect(x0 + off + k * cell, y0 + off + r * cell, cell, cell);
+  }
+  function rr(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  /** โหลดรูป (หน้าเว็บ) · ตัวทดสอบนอกเบราว์เซอร์ใส่ loadImgOverride มาแทน */
+  const loadImg = src => typeof loadImgOverride === 'function' ? loadImgOverride(src)
+    : new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
+  const seeded = n => () => (n = (n * 16807) % 2147483647) / 2147483647;
+  async function posterFonts() {
+    try { await Promise.all(['800 60px "Noto Sans Thai"', '400 40px "Noto Sans Thai"', '400 60px "Anton"'].map(f => document.fonts.load(f))); } catch { /* ใช้ฟอนต์เครื่อง */ }
+  }
+  /** ลายบล็อกเรขาคณิตสีสด (แรงบันดาลใจงานกีฬาใหญ่ 2026): ตาราง + วงกลมเสี้ยว/ครึ่งวง/แถบ/สามเหลี่ยม/วงแหวน สุ่มแบบกำหนดเมล็ด */
+  function blocks(g, pal, x0, y0, w, h, cell, seed) {
+    const rnd = seeded(seed), pick = () => pal[Math.floor(rnd() * pal.length)];
+    for (let y = y0; y < y0 + h; y += cell) for (let x = x0; x < x0 + w; x += cell) {
+      const bg = pick(); let fg = pick(); if (fg === bg) fg = pal[(pal.indexOf(bg) + 1) % pal.length];
+      g.fillStyle = bg; g.fillRect(x, y, cell, cell); g.fillStyle = fg;
+      const t = Math.floor(rnd() * 7), q = Math.floor(rnd() * 4), cx = x + (q % 2) * cell, cy = y + (q > 1 ? cell : 0);
+      g.beginPath();
+      if (t === 0) { g.moveTo(cx, cy); g.arc(cx, cy, cell, 0, Math.PI * 2); g.save(); g.clip(); g.fillRect(x, y, cell, cell); g.restore(); }
+      else if (t === 1) { g.arc(x + cell / 2, y + (q % 2 ? 0 : cell), cell / 2, 0, Math.PI * 2); g.save(); g.rect(x, y, cell, cell); g.clip(); g.fill(); g.restore(); }
+      else if (t === 2) { for (let i = 0; i < 4; i++) g.fillRect(x, y + i * cell / 4, cell, cell / 8); }
+      else if (t === 3) { g.moveTo(x, y); g.lineTo(x + cell, q % 2 ? y : y + cell); g.lineTo(x, y + cell); g.closePath(); g.fill(); }
+      else if (t === 4) { g.lineWidth = cell / 6; g.strokeStyle = fg; g.arc(x + cell / 2, y + cell / 2, cell * 0.32, 0, Math.PI * 2); g.stroke(); }
+      else if (t === 5) { g.arc(x + cell / 2, y + cell / 2, cell * 0.18, 0, Math.PI * 2); g.fill(); }
+      else { g.fillRect(x, y, cell / 2, cell / 2); g.fillRect(x + cell / 2, y + cell / 2, cell / 2, cell / 2); }
+    }
+  }
+  /** โปสเตอร์บัตรเข้างาน (access pass / ตั๋ว): พื้นลายบล็อกสีสด + บัตรขาวมีรูคล้องสาย + แถบหัวลาย + QR + ช่องข้อมูลแบบตั๋ว + รอยปรุตอนฉีก + บาร์โค้ด */
+  async function posterPass(it) {
+    await posterFonts();
+    const P = it.pal;
+    const c = document.createElement('canvas'); c.width = PW; c.height = PH;
+    const g = c.getContext('2d');
+    blocks(g, P, 0, 0, PW, PH, 155, 11 + it.key.length * 7);
+    g.fillStyle = 'rgba(0,0,0,.12)'; g.fillRect(0, 0, PW, PH);
+    // บัตร (วาดแยกชั้น เจาะรู/รอยบากด้วย destination-out)
+    const card = document.createElement('canvas'); card.width = PW; card.height = PH;
+    const k = card.getContext('2d');
+    const X = 110, Y = 60, W = PW - 220, H = PH - 120, cut = 1330;
+    rr(k, X, Y, W, H, 46); k.fillStyle = '#ffffff'; k.fill();
+    // แถบหัว: ลายบล็อกเล็ก + ไล่สีทับ ให้ตัวหนังสืออ่านง่าย
+    k.save(); rr(k, X, Y, W, 470, 46); k.rect(X, Y + 46, W, 424); k.clip();
+    blocks(k, P, X, Y, W, 470, 85, 5 + it.key.length);
+    const hg = k.createLinearGradient(0, Y, 0, Y + 470); hg.addColorStop(0, 'rgba(0,0,0,.05)'); hg.addColorStop(1, 'rgba(0,0,0,.55)');
+    k.fillStyle = hg; k.fillRect(X, Y, W, 470); k.restore();
+    // แผ่นสีหลักทับครึ่งล่างของหัว (บล็อกตัวหนังสือ)
+    k.fillStyle = P[0]; k.beginPath(); k.moveTo(X, Y + 250); k.lineTo(X + W, Y + 190); k.lineTo(X + W, Y + 470); k.lineTo(X, Y + 470); k.closePath(); k.fill();
+    // ฟอยล์โฮโลแกรม (มุมขวาบน)
+    const hx = X + W - 120, hy = Y + 130;
+    const holo = k.createLinearGradient(hx - 70, hy - 70, hx + 70, hy + 70);
+    ['#ff6ec7', '#ffd36e', '#7affc4', '#6ecbff', '#c16eff', '#ff6ec7'].forEach((col, i) => holo.addColorStop(i / 5, col));
+    k.fillStyle = holo; k.beginPath(); k.arc(hx, hy, 70, 0, Math.PI * 2); k.fill();
+    k.strokeStyle = 'rgba(255,255,255,.9)'; k.lineWidth = 4; k.stroke();
+    k.fillStyle = 'rgba(20,20,30,.85)'; fitText(k, 'OFFICIAL', hx, hy - 4, px => EN(400, px), 30, 110); fitText(k, 'PASS', hx, hy + 30, px => EN(400, px), 30, 110);
+    // ตัวหนังสือหัว
+    rr(k, X + W / 2 - 300, Y + 92, 480, 76, 38); k.fillStyle = 'rgba(15,15,30,.72)'; k.fill();
+    k.fillStyle = '#ffffff'; spaced(k, 'CORING PRO', X + W / 2 - 60, Y + 150, EN(400, 52), 10);
+    k.save(); k.shadowColor = 'rgba(0,0,0,.35)'; k.shadowBlur = 10;
+    k.fillStyle = '#ffffff'; fitText(k, it.en, X + W / 2, Y + 330, px => EN(400, px), 128, W - 120);
+    k.fillStyle = P[1] === '#FFFFFF' ? '#111' : '#ffffff'; fitText(k, it.th, X + W / 2, Y + 430, px => TH(800, px), 72, W - 120);
+    k.restore();
+    // ป้ายประเภท + QR (ขาวรอบ QR ≥ 4 ช่อง)
+    rr(k, X + W / 2 - 170, Y + 488, 340, 56, 28); k.fillStyle = '#111'; k.fill();
+    k.fillStyle = '#fff'; fitText(k, it.badge, X + W / 2, Y + 527, px => TH(800, px), 30, 310);
+    drawQr(k, it.url, X + W / 2 - 270, Y + 620, 540);
+    // ช่องข้อมูลแบบตั๋ว 3 ช่อง
+    const fy = Y + 1218, fw = (W - 120) / 3;
+    it.fields.forEach(([lab, val], i) => {
+      const fx = X + 60 + i * fw;
+      if (i) { k.fillStyle = '#e3e3e8'; k.fillRect(fx - 2, fy - 6, 2, 96); }
+      k.fillStyle = '#8a8a93'; fitText(k, lab, fx + fw / 2, fy + 22, px => EN(400, px), 26, fw - 30);
+      k.fillStyle = '#111'; fitText(k, val, fx + fw / 2, fy + 72, px => TH(800, px), 38, fw - 30);
     });
-    g.textAlign = 'center'; g.fillStyle = '#777'; g.font = F(400, 32); g.fillText(it.poster.foot, W / 2, H - 60);
+    // รอยปรุ + รอยบากครึ่งวงกลมสองข้าง
+    k.setLineDash([16, 14]); k.strokeStyle = '#c9c9d1'; k.lineWidth = 4;
+    k.beginPath(); k.moveTo(X + 50, Y + cut - 10); k.lineTo(X + W - 50, Y + cut - 10); k.stroke(); k.setLineDash([]);
+    // ตอนฉีก: ขั้นตอน + แถบสี + บาร์โค้ด
+    it.steps.forEach((t, i) => {
+      const y = Y + cut + 62 + i * 66;
+      k.fillStyle = P[i % P.length]; k.beginPath(); k.arc(X + 92, y - 12, 24, 0, Math.PI * 2); k.fill();
+      k.fillStyle = '#fff'; fitText(k, String(i + 1), X + 92, y - 1, px => EN(400, px), 30, 30);
+      k.fillStyle = '#111'; fitText(k, t, X + 134, y, px => TH(400, px), 36, W - (it.avatar ? 440 : 360), 'left');
+    });
+    let face = null;
+    if (it.avatar) try { face = await loadImg(it.avatar); } catch { /* ไม่มีรูป = ใช้บาร์โค้ดแทน */ }
+    if (face) {   // รูปน้องจ๊อบ: วงกลมขอบขาว + วงสีหลัก + เงา (แทนบาร์โค้ด)
+      const ax = X + W - 150, ay = Y + cut + 136, ar = 112;
+      k.save(); k.shadowColor = 'rgba(0,0,0,.35)'; k.shadowBlur = 24; k.shadowOffsetY = 10;
+      k.fillStyle = P[0]; k.beginPath(); k.arc(ax, ay, ar + 14, 0, Math.PI * 2); k.fill(); k.restore();
+      k.fillStyle = '#fff'; k.beginPath(); k.arc(ax, ay, ar + 6, 0, Math.PI * 2); k.fill();
+      k.save(); k.beginPath(); k.arc(ax, ay, ar, 0, Math.PI * 2); k.clip(); k.drawImage(face, ax - ar, ay - ar, ar * 2, ar * 2); k.restore();
+    } else {
+      const rnd = seeded(31);
+      for (let x = X + W - 190; x < X + W - 50;) { const w = 2 + Math.floor(rnd() * 6); k.fillStyle = '#111'; k.fillRect(x, Y + cut + 30, w, 170); x += w + 2 + Math.floor(rnd() * 5); }
+      k.fillStyle = '#8a8a93'; fitText(k, it.code, X + W - 120, Y + cut + 228, px => EN(400, px), 20, 150);
+    }
+    k.fillStyle = '#111'; fitText(k, 'เฉพาะทีมงาน · TEAM ONLY', X + 60, Y + H - 50, px => TH(800, px), 34, W - 340, 'left');
+    P.forEach((col, i) => { k.fillStyle = col; k.fillRect(X + i * W / P.length, Y + H - 26, W / P.length + 1, 26); });
+    k.save(); k.globalCompositeOperation = 'destination-in'; rr(k, X, Y, W, H, 46); k.fill(); k.restore();
+    k.globalCompositeOperation = 'destination-out';
+    rr(k, X + W / 2 - 90, Y + 26, 180, 30, 15); k.fill();                                    // รูคล้องสาย
+    [X, X + W].forEach(x => { k.beginPath(); k.arc(x, Y + cut - 10, 34, 0, Math.PI * 2); k.fill(); });
+    k.globalCompositeOperation = 'source-over';
+    k.strokeStyle = 'rgba(255,255,255,.9)'; k.lineWidth = 5; rr(k, X + W / 2 - 92, Y + 24, 184, 34, 17); k.stroke();   // ขอบรูคล้องสาย
+    // วางบัตรบนพื้น + เงา
+    g.save(); g.shadowColor = 'rgba(0,0,0,.45)'; g.shadowBlur = 60; g.shadowOffsetY = 30; g.drawImage(card, 0, 0); g.restore();
     return c;
   }
-  function openPoster(src) {
+  function openPoster(src, name) {
     sheet('<h2>🖨️ โปสเตอร์ A4</h2><p class="muted small">ถ้าไฟล์ไม่ดาวน์โหลดเอง (เช่นในแอปไลน์): กดค้างที่รูป → บันทึกรูป แล้วสั่งพิมพ์ขนาด A4 · หรือเปิดหน้านี้ในคอมแล้วพิมพ์</p>' +
-      '<img class="poster-img" src="' + src + '" alt="โปสเตอร์"><div class="actions"><button class="btn" id="p-back">‹ กลับ</button><button class="btn" data-close>ปิด</button></div>',
+      '<img class="poster-img" src="' + src + '" alt="' + esc(name) + '"><div class="actions"><button class="btn" id="p-back">‹ กลับ</button><button class="btn" data-close>ปิด</button></div>',
       el => { el.querySelector('#p-back').onclick = qrSheet; });
   }
   function qrSheet() {
     if (typeof qrcode !== 'function') return toast('โหลดตัวสร้าง QR ไม่ได้ ลองรีเฟรช');
-    const items = [
-      { key: 'jop', url: 'https://line.me/R/oaMessage/' + JOP_ID + '/', title: '💬 แชทน้องจ๊อบ', sub: 'สแกนแล้วเข้าแชทน้องจ๊อบทันที (ยังไม่เป็นเพื่อน = เพิ่มเพื่อนก่อน)',
-        poster: { head: 'น้องจ๊อบ จดงาน', title: 'สแกน เข้าแชทน้องจ๊อบ', foot: 'LINE ' + JOP_ID + ' · กดค้างที่แชท → ปักหมุด ให้อยู่บนสุด',
-          steps: ['เปิดกล้องมือถือ หรือ LINE › สแกน QR', 'กดเปิดในไลน์ → เข้าแชทน้องจ๊อบ', 'กดเมนู "แจ้งงานซ่อม" หรือส่งรูป/พิมพ์เล่าได้เลย'] } },
-      { key: 'web', url: 'https://liff.line.me/' + CFG.LIFF_ID, title: '📋 ระบบงานช่าง', sub: 'สแกนแล้วเปิดบอร์ดงานในไลน์',
-        poster: { head: 'ระบบงานช่าง', title: 'สแกน เปิดบอร์ดงาน', foot: 'CoringPro · ต้องเป็นทีมงานในระบบเท่านั้น',
-          steps: ['เปิดกล้องมือถือ หรือ LINE › สแกน QR', 'กดเปิดในไลน์ (ครั้งแรกกดอนุญาต)', 'ดูงาน ค้นหา เปิดงาน ตรวจคิว ได้ทันที'] } }];
-    sheet('<h2>📱 QR เข้าระบบเร็ว</h2><p class="muted small">สแกนด้วยกล้องมือถือหรือไลน์ · กดบันทึกรูปไปพิมพ์ติดโต๊ะ/ผนัง หรือส่งให้คนใหม่ในทีม</p>' +
-      items.map(it => '<div class="qr-card"><div class="qr-img" id="qr-' + it.key + '"></div><b>' + it.title + '</b><p class="muted small">' + esc(it.sub) + '</p>' +
-        '<div class="actions"><button class="btn primary" data-poster="' + it.key + '">🖨️ โปสเตอร์ A4 สำหรับพิมพ์</button><button class="btn" data-qrdl="' + it.key + '">⬇️ บันทึกเฉพาะ QR</button><button class="btn" data-qrcopy="' + it.key + '">🔗 คัดลอกลิงก์</button></div></div>').join('') +
+    const items = QR_ITEMS();
+    sheet('<h2>📱 QR เข้าระบบเร็ว</h2><p class="muted small">กด 🖨️ ได้โปสเตอร์ A4 ไปพิมพ์ติดผนัง/โต๊ะในแผนก · หรือคัดลอกลิงก์ส่งให้คนใหม่</p>' +
+      items.map(it => '<div class="qr-card"><div class="qr-img" id="qr-' + it.key + '"></div><b>' + esc(it.title) + '</b><p class="muted small">' + esc(it.sub) + '</p>' +
+        '<div class="actions"><button class="btn primary" data-pp="' + it.key + '">🖨️ โปสเตอร์ A4</button><button class="btn" data-qrcopy="' + it.key + '">🔗 คัดลอกลิงก์</button></div></div>').join('') +
       '<p class="muted small">💡 ในไลน์: กดค้างที่แชทน้องจ๊อบ → <b>ปักหมุด</b> ให้อยู่บนสุดเสมอ</p>' +
       '<div class="actions"><button class="btn" data-close>ปิด</button></div>', el => {
       items.forEach(it => {
-        const c = qrCanvas(it.url, it.title.replace(/^\S+\s/, ''), it.key === 'jop' ? 'LINE ' + JOP_ID : 'CoringPro');
+        const c = document.createElement('canvas'); c.width = c.height = 300;
+        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 300, 300); drawQr(g, it.url, 10, 10, 280);
         const img = new Image(); img.src = c.toDataURL('image/png'); img.alt = it.title;
         el.querySelector('#qr-' + it.key).appendChild(img);
-        el.querySelector('[data-qrdl="' + it.key + '"]').onclick = () => { const a = document.createElement('a'); a.href = img.src; a.download = 'qr-' + it.key + '.png'; a.click(); };
-        el.querySelector('[data-poster="' + it.key + '"]').onclick = async () => {
-          const p = await posterCanvas(it);
-          const src = p.toDataURL('image/png');
-          const a = document.createElement('a'); a.href = src; a.download = 'poster-' + it.key + '.png'; a.click();
-          // ในแอปไลน์ดาวน์โหลดไฟล์ไม่ได้: แสดงรูปให้กดค้างบันทึก
-          openPoster(src);
-        };
         el.querySelector('[data-qrcopy="' + it.key + '"]').onclick = async () => {
           try { await navigator.clipboard.writeText(it.url); toast('คัดลอกลิงก์แล้ว ✅'); } catch { prompt('คัดลอกลิงก์นี้', it.url); }
         };
+        const make = (sel, fn) => el.querySelector(sel).onclick = async e => {
+          e.target.textContent = 'กำลังสร้าง…';
+          const src = (await fn(it)).toDataURL('image/png');
+          const a = document.createElement('a'); a.href = src; a.download = 'poster-' + it.key + '.png'; a.click();
+          openPoster(src, it.title);   // ในแอปไลน์ดาวน์โหลดไม่ได้: แสดงรูปให้กดค้างบันทึก
+        };
+        make('[data-pp="' + it.key + '"]', posterPass);
       });
     });
   }
