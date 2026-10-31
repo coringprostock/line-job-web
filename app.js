@@ -215,6 +215,7 @@
   function drawBoard(listOnly) {
     state.boardView = state.boardView || pref('boardView') || 'list';
     if (state.boardView === 'dash') return drawDashboard();
+    if (state.boardView === 'daily') return drawDaily();
     const b = state.board;
     const q = state.query.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, '');
@@ -284,14 +285,152 @@
 
   function viewToggle() {
     const seg = (v, label) => '<button class="seg' + (state.boardView === v ? ' on' : '') + '" data-view="' + v + '">' + label + '</button>';
-    return '<div class="view-toggle"><div class="segs">' + seg('list', 'รายการ') + seg('dash', 'ภาพรวม') + '</div>' +
+    return '<div class="view-toggle"><div class="segs">' + seg('list', 'รายการ') + seg('dash', 'ภาพรวม') + seg('daily', 'สรุปงาน') + '</div>' +
+      '<button class="btn" id="qr-btn" title="QR เข้าระบบ / แชทน้องจ๊อบ">📱 QR</button>' +
       '<a class="btn primary new-job-btn" href="#new">＋ เปิดงาน</a></div><div style="height:10px"></div>';
   }
   function bindViewToggle() {
+    const qb = document.getElementById('qr-btn');
+    if (qb) qb.onclick = qrSheet;
     $app.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
       state.boardView = b.dataset.view;
       pref('boardView', state.boardView);
       drawBoard();
+    });
+  }
+
+  // ---------- สรุปงานประจำวัน (ผู้ใช้ 31 ต.ค. 2569 · แทนข้อความสรุป 18:00 ในกลุ่ม) ----------
+  // เปิดดูเช้าวันถัดไปหลังตรวจคิว (ค่าเริ่มต้น = เมื่อวาน) · Worker คำนวณสดทุกครั้ง ตรวจคิวเพิ่มแล้วตัวเลขของวันนั้นเปลี่ยนตาม
+  const THB = 33;
+  async function drawDaily() {
+    const live = claim();
+    const day = state.dailyDay || '';
+    $app.innerHTML = viewToggle() + '<div class="center muted">กำลังสรุปงาน…</div>';
+    bindViewToggle();
+    let r;
+    try { r = await core('daily', { day }, 30000); } catch (err) { if (live() && err.message !== 'login') $app.innerHTML = viewToggle() + '<div class="center muted">⚠️ ' + esc(err.message) + '</div>'; bindViewToggle(); return; }
+    if (!live() || state.boardView !== 'daily') return;
+    const a = r.ai, n = r.now, sy = r.system;
+    const jobLink = j => '<a href="#job/' + noDigits(j.no) + '">' + esc(j.no) + '</a> ' + esc(j.title);
+    const box = (title, inner) => '<div class="panel-box"><h3>' + title + '</h3>' + inner + '</div>';
+    const li = list => list.length ? '<ul class="plain">' + list.map(x => '<li>' + x + '</li>').join('') + '</ul>' : '<p class="muted small">ไม่มี</p>';
+    const baht = usd => '$' + usd.toFixed(2) + ' ≈ ' + Math.round(usd * THB) + ' บาท';
+    let h = viewToggle() + '<div class="day-nav"><button class="btn" data-day="' + r.prev + '">‹</button><b>สรุปงาน ' + esc(fmtKey(r.day)) +
+      (r.today ? ' (วันนี้)' : '') + '</b><button class="btn" data-day="' + r.next + '"' + (r.next ? '' : ' disabled') + '>›</button></div>';
+    if (r.today) h += '<div class="note-flag">🕒 วันนี้ยังไม่จบ ตัวเลขยังเพิ่มได้ · สรุปที่ครบให้ดูพรุ่งนี้เช้า</div>';
+    if (a.pending) h += '<a class="note-flag warn" href="#review">⚠️ ยังตรวจไม่ครบ: ข้อความของวันนี้ค้างในคิวตรวจ <b>' + a.pending + ' ข้อ</b> — ตัวเลขยังไม่ใช่ตัวสุดท้าย กดไปตรวจ ›</a>';
+    else if (a.blocks && !r.today) h += '<div class="note-flag ok">✅ ตรวจคิวของวันนี้ครบแล้ว ตัวเลขเป็นตัวสุดท้าย</div>';
+    const tile = (num, lbl, cls) => '<div class="tile' + (cls ? ' ' + cls : '') + '"><div class="num">' + num + '</div><div class="lbl">' + lbl + '</div></div>';
+    h += '<div class="tiles">' + tile(r.jobs.opened.length, 'งานเข้า') + tile(r.jobs.closed.filter(j => j.status === 'ปิด').length, 'ปิดงาน') +
+      tile(r.chat.total, 'ข้อความในกลุ่ม') + tile(a.pending, 'ค้างตรวจ', a.pending ? 'warn' : '') + '</div>';
+    h += box('🆕 งานเข้า (' + r.jobs.opened.length + ')', li(r.jobs.opened.map(j => jobLink(j) + ' <span class="muted small">· ' + esc(j.by) + ' · ตอนนี้ ' + esc(j.status) + '</span>')));
+    h += box('✅ ปิด / ยกเลิก (' + r.jobs.closed.length + ')', li(r.jobs.closed.map(j => jobLink(j) + ' <span class="muted small">· ' + esc(j.status) + '</span>' +
+      (j.status !== 'ปิด' ? '' : j.repair === 'ยืนยันแล้ว' ? ' <span class="pill ok">📋 สรุปการซ่อมแล้ว</span>' : ' <span class="pill warn">ยังไม่สรุปการซ่อม</span>'))));
+    const acc = a.judged - a.unsure;
+    if (r.admin) h += box('🤖 AI อ่านแชท <span class="pill">ผู้บริหาร</span>', '<p>' + a.blocks + ' ก้อน · งานใหม่ ' + a.newJob + ' · อัปเดต ' + a.update + ' · ไม่เกี่ยว ' + a.notJob + ' · ไม่แน่ใจ ' + a.unsure + '</p>' +
+      (a.judged ? '<p>คนตรวจแล้ว ' + a.judged + ' ข้อ · <b>ตรง ' + a.agree + '/' + acc + (acc ? ' (' + Math.round(a.agree * 100 / acc) + '%)' : '') + '</b> · พลาดงานใหม่ ' + a.missed +
+        ' · เปิดเกิน ' + a.extra + '</p>' : '<p class="muted small">ยังไม่มีข้อที่คนตรวจ</p>') +
+      '<p class="muted small">ค่า AI วันนี้ ' + baht(a.usd) + ' · ทั้งเดือนถึงวันนี้ ' + baht(a.usdMonth) + '</p>');
+    h += box('💬 แชทกลุ่มหลัก', r.chat.total ? '<p>' + esc(r.chat.byType.join(' · ')) + '</p><p class="muted small">พิมพ์มากสุด: ' + esc(r.chat.top.join(' · ')) + '</p>' : '<p class="muted small">ไม่มีข้อความ</p>');
+    h += box('📂 งานที่ต้องตาม (ณ ตอนนี้ · เปิดอยู่ ' + n.open + ' งาน)',
+      '<p class="small"><b>⏰ ถึงวันตาม / เลยกำหนด (' + n.due.length + ')</b></p>' + li(n.due.map(j => jobLink(j) + ' <span class="muted small">· ' + esc(j.status) + ' · ' + (j.late > 0 ? 'เลยมา ' + j.late + ' วัน' : 'ตามวันนี้') + '</span>')) +
+      '<p class="small"><b>😶 เงียบเกิน ' + n.silentDays + ' วันทำการ (' + n.silent.length + ')</b></p>' + li(n.silent.map(j => jobLink(j) + ' <span class="muted small">· ' + esc(j.status) + ' · เงียบ ' + j.quiet + ' วัน</span>')) +
+      (n.repairPending.length ? '<p class="small"><b>📋 ปิดแล้วยังไม่สรุปการซ่อม (' + n.repairPending.length + ')</b></p><p>' +
+        n.repairPending.map(no => '<a href="#job/' + noDigits(no) + '">' + esc(no) + '</a>').join(' ') + '</p>' : '') +
+      '<p class="muted small">สถานะ: ' + esc(n.byStatus.map(x => x[0] + ' ' + x[1]).join(' · ')) + '</p>');
+    const warn = [];
+    if (sy) {   // สถานะระบบ: Worker ส่งมาเฉพาะผู้บริหาร/ผู้ทำระบบ
+    if (!sy.mainOk) warn.push('ไม่พบห้องหลัก');
+    if (sy.macOffline) warn.push('Mac ไม่ทำงานเกิน 35 นาที (ไฟล์ยังมีสำเนาใน R2)');
+    if (sy.errors) warn.push('error ' + sy.errors + ' ครั้ง');
+    if (sy.media.gone) warn.push('LINE ลบไฟล์ไปก่อนดึงทัน ' + sy.media.gone + ' ไฟล์');
+    if (sy.unknownGroups.length) warn.push('กลุ่มที่ไม่รู้จัก: ' + sy.unknownGroups.join(', '));
+    h += box('🛠️ ระบบ <span class="pill">ผู้บริหาร</span>', (warn.length ? '<p class="flag-due small">⚠️ ' + esc(warn.join(' · ')) + '</p>' : '<p class="small">✅ ปกติ</p>') +
+      '<p class="muted small">📷 รูป ' + sy.media.image + ' · คลิป ' + sy.media.video + ' (เก็บแล้ว ' + sy.media.kept + ')' +
+      (sy.macSeen ? ' · Mac ล่าสุด ' + esc(fmtDateTime(sy.macSeen)) : '') + '<br>' + esc(sy.backup) + '<br>📨 โควตา LINE เดือนนี้: ' + esc(sy.quota) +
+      '<br>👥 Staff ' + sy.staff + ' คน' + (sy.noRole.length ? ' · ยังไม่ใส่บทบาท: ' + esc(sy.noRole.slice(0, 8).join(', ')) : '') + '</p>');
+    }
+    $app.innerHTML = h;
+    bindViewToggle();
+    $app.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { if (!b.dataset.day) return; state.dailyDay = b.dataset.day; drawDaily(); });
+  }
+
+  // ---------- QR เข้าระบบเร็ว (ผู้ใช้ 31 ต.ค. 2569: หาแชทน้องจ๊อบในไลน์ไม่เจอ) · พิมพ์ติดผนัง/โต๊ะ หรือส่งให้คนใหม่ ----------
+  const JOP_ID = '@696abybi';
+  function qrCanvas(url, title, sub) {
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    const n = qr.getModuleCount(), cell = Math.floor(520 / n), size = cell * n, pad = 40;
+    const c = document.createElement('canvas');
+    c.width = size + pad * 2; c.height = size + pad * 2 + 120;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#000';
+    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect(pad + k * cell, pad + r * cell, cell, cell);
+    g.textAlign = 'center';
+    g.font = '700 40px "Noto Sans Thai", sans-serif'; g.fillText(title, c.width / 2, size + pad + 60);
+    g.font = '26px "Noto Sans Thai", sans-serif'; g.fillStyle = '#555'; g.fillText(sub, c.width / 2, size + pad + 100);
+    return c;
+  }
+  /** โปสเตอร์ A4 (1240×1754 = 150 dpi) ติดในแผนก ให้ทีมสแกนเข้าแชท/ระบบ */
+  async function posterCanvas(it) {
+    try { await document.fonts.load('700 60px "Noto Sans Thai"'); await document.fonts.load('400 40px "Noto Sans Thai"'); } catch { /* ใช้ฟอนต์เครื่อง */ }
+    const W = 1240, H = 1754, c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d'), F = (w, px) => w + ' ' + px + 'px "Noto Sans Thai", sans-serif';
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#06C755'; g.fillRect(0, 0, W, 210);
+    g.fillStyle = '#fff'; g.textAlign = 'center';
+    g.font = F(700, 84); g.fillText(it.poster.head, W / 2, 135);
+    g.fillStyle = '#111'; g.font = F(700, 64); g.fillText(it.poster.title, W / 2, 330);
+    const qr = qrcode(0, 'M'); qr.addData(it.url); qr.make();
+    const n = qr.getModuleCount(), cell = Math.floor(820 / n), size = cell * n, x0 = (W - size) / 2, y0 = 390;
+    g.fillStyle = '#000';
+    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect(x0 + k * cell, y0 + r * cell, cell, cell);
+    g.textAlign = 'left'; g.font = F(400, 40); g.fillStyle = '#222';
+    let y = y0 + size + 110;
+    it.poster.steps.forEach((t, i) => {
+      g.fillStyle = '#06C755'; g.beginPath(); g.arc(150, y - 14, 30, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#fff'; g.font = F(700, 36); g.textAlign = 'center'; g.fillText(String(i + 1), 150, y);
+      g.fillStyle = '#222'; g.font = F(400, 40); g.textAlign = 'left'; g.fillText(t, 205, y);
+      y += 85;
+    });
+    g.textAlign = 'center'; g.fillStyle = '#777'; g.font = F(400, 32); g.fillText(it.poster.foot, W / 2, H - 60);
+    return c;
+  }
+  function openPoster(src) {
+    sheet('<h2>🖨️ โปสเตอร์ A4</h2><p class="muted small">ถ้าไฟล์ไม่ดาวน์โหลดเอง (เช่นในแอปไลน์): กดค้างที่รูป → บันทึกรูป แล้วสั่งพิมพ์ขนาด A4 · หรือเปิดหน้านี้ในคอมแล้วพิมพ์</p>' +
+      '<img class="poster-img" src="' + src + '" alt="โปสเตอร์"><div class="actions"><button class="btn" id="p-back">‹ กลับ</button><button class="btn" data-close>ปิด</button></div>',
+      el => { el.querySelector('#p-back').onclick = qrSheet; });
+  }
+  function qrSheet() {
+    if (typeof qrcode !== 'function') return toast('โหลดตัวสร้าง QR ไม่ได้ ลองรีเฟรช');
+    const items = [
+      { key: 'jop', url: 'https://line.me/R/oaMessage/' + JOP_ID + '/', title: '💬 แชทน้องจ๊อบ', sub: 'สแกนแล้วเข้าแชทน้องจ๊อบทันที (ยังไม่เป็นเพื่อน = เพิ่มเพื่อนก่อน)',
+        poster: { head: 'น้องจ๊อบ จดงาน', title: 'สแกน เข้าแชทน้องจ๊อบ', foot: 'LINE ' + JOP_ID + ' · กดค้างที่แชท → ปักหมุด ให้อยู่บนสุด',
+          steps: ['เปิดกล้องมือถือ หรือ LINE › สแกน QR', 'กดเปิดในไลน์ → เข้าแชทน้องจ๊อบ', 'กดเมนู "แจ้งงานซ่อม" หรือส่งรูป/พิมพ์เล่าได้เลย'] } },
+      { key: 'web', url: 'https://liff.line.me/' + CFG.LIFF_ID, title: '📋 ระบบงานช่าง', sub: 'สแกนแล้วเปิดบอร์ดงานในไลน์',
+        poster: { head: 'ระบบงานช่าง', title: 'สแกน เปิดบอร์ดงาน', foot: 'CoringPro · ต้องเป็นทีมงานในระบบเท่านั้น',
+          steps: ['เปิดกล้องมือถือ หรือ LINE › สแกน QR', 'กดเปิดในไลน์ (ครั้งแรกกดอนุญาต)', 'ดูงาน ค้นหา เปิดงาน ตรวจคิว ได้ทันที'] } }];
+    sheet('<h2>📱 QR เข้าระบบเร็ว</h2><p class="muted small">สแกนด้วยกล้องมือถือหรือไลน์ · กดบันทึกรูปไปพิมพ์ติดโต๊ะ/ผนัง หรือส่งให้คนใหม่ในทีม</p>' +
+      items.map(it => '<div class="qr-card"><div class="qr-img" id="qr-' + it.key + '"></div><b>' + it.title + '</b><p class="muted small">' + esc(it.sub) + '</p>' +
+        '<div class="actions"><button class="btn primary" data-poster="' + it.key + '">🖨️ โปสเตอร์ A4 สำหรับพิมพ์</button><button class="btn" data-qrdl="' + it.key + '">⬇️ บันทึกเฉพาะ QR</button><button class="btn" data-qrcopy="' + it.key + '">🔗 คัดลอกลิงก์</button></div></div>').join('') +
+      '<p class="muted small">💡 ในไลน์: กดค้างที่แชทน้องจ๊อบ → <b>ปักหมุด</b> ให้อยู่บนสุดเสมอ</p>' +
+      '<div class="actions"><button class="btn" data-close>ปิด</button></div>', el => {
+      items.forEach(it => {
+        const c = qrCanvas(it.url, it.title.replace(/^\S+\s/, ''), it.key === 'jop' ? 'LINE ' + JOP_ID : 'CoringPro');
+        const img = new Image(); img.src = c.toDataURL('image/png'); img.alt = it.title;
+        el.querySelector('#qr-' + it.key).appendChild(img);
+        el.querySelector('[data-qrdl="' + it.key + '"]').onclick = () => { const a = document.createElement('a'); a.href = img.src; a.download = 'qr-' + it.key + '.png'; a.click(); };
+        el.querySelector('[data-poster="' + it.key + '"]').onclick = async () => {
+          const p = await posterCanvas(it);
+          const src = p.toDataURL('image/png');
+          const a = document.createElement('a'); a.href = src; a.download = 'poster-' + it.key + '.png'; a.click();
+          // ในแอปไลน์ดาวน์โหลดไฟล์ไม่ได้: แสดงรูปให้กดค้างบันทึก
+          openPoster(src);
+        };
+        el.querySelector('[data-qrcopy="' + it.key + '"]').onclick = async () => {
+          try { await navigator.clipboard.writeText(it.url); toast('คัดลอกลิงก์แล้ว ✅'); } catch { prompt('คัดลอกลิงก์นี้', it.url); }
+        };
+      });
     });
   }
 
@@ -401,7 +540,7 @@
     if (off) html += '<p><span class="pill">' + esc(j.status) + '</span></p>';
     html += '</div>';
 
-    html += infoHtml(data);
+    html += infoHtml(data) + repairHtml(data);
     html += '<div class="stepper" id="stepper">';
     FLOW.forEach((s, i) => {
       const cls = off ? '' : i < idx ? 'past' : i === idx ? 'current' : '';
@@ -448,6 +587,7 @@
     if (cancel) cancel.onclick = () => statusSheet(data, 'ยกเลิก');
     document.getElementById('rename').onclick = () => renameSheet(data);
     wireInfo(data);
+    wireRepair(data);
     document.getElementById('reprint').onclick = e => reprintLabel(e.target, { no: data.job.no });
     document.getElementById('save-note').onclick = async e => {
       const note = document.getElementById('note').value.trim();
@@ -457,6 +597,7 @@
     };
     loadThumbs();
     $app.querySelectorAll('[data-media]').forEach(el => el.onclick = () => openMedia({ msgId: el.dataset.media, type: el.dataset.mtype, full: el.dataset.full }));
+    if (state.openRepair) { state.openRepair = false; repairSheet(data); }   // ลิงก์จากน้องจ๊อบหลังปิดงาน (?repair=1)
   }
 
   // ป้ายหลุด/หาย → เข้าคิวพิมพ์ใหม่ (พิมพ์เสร็จน้องจ๊อบทักบอกคนที่กด)
@@ -686,7 +827,9 @@
       if (changes.status === 'ปิด') { // ป๊อปอัปปิดงาน (ผู้ใช้ 26 ต.ค. 2569) · น้องจ๊อบทักคนปิดในแชทด้วย
         sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>ปิดงานแล้ว</h2><div class="big-no">' + esc(no) + '</div>' +
           '<p>ขอบคุณครับ 🙏</p><p class="muted small">น้องจ๊อบส่งสรุปไว้ในแชทให้แล้ว</p>' +
-          '<div class="actions"><button class="btn primary" data-close>ตกลง</button></div></div>');
+          '<p><b>ต่ออีกนิด: สรุปการซ่อม</b><br><span class="muted small">ใส่รูป/พูดเล่าว่าเสียตรงไหน เพราะอะไร AI สรุปเป็นหัวข้อ เก็บเป็นประวัติของรุ่นนี้</span></p>' +
+          '<div class="actions"><button class="btn primary" id="f-repair">📋 สรุปการซ่อมเลย</button><button class="btn" data-close>ไว้ทีหลัง</button></div></div>',
+          el => { el.querySelector('#f-repair').onclick = () => repairSheet(data, changes.note); });
       } else toast(okMsg + ' ✅');
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message);
@@ -749,6 +892,145 @@
         const date = el.querySelector('#f-date');
         await save(data.job.no, { status, follow: date ? date.value : '', note: el.querySelector('#f-note').value.trim() },
           data.job.no + ' → ' + status);
+      };
+    });
+  }
+
+  // ---------- สรุปการซ่อม (ผู้ใช้ 31 ต.ค. 2569): รูป/คลิป + พูดเล่า → AI สรุปเป็นหัวข้อ ถามต่อถ้าสาเหตุไม่ชัด → คนแก้/ยืนยัน ----------
+  // เก็บเป็นประวัติการเสียต่อรุ่น (วิเคราะห์จุดอ่อนสินค้า → R&D) · ใครในทีมก็สรุปได้ · ปิดงานแล้วเด้งมาให้ทำต่อ
+  const REPAIR_ROWS = [['system', '⚙️ ระบบที่เสีย'], ['part', '🔩 ชิ้นส่วนที่เสีย'], ['symptom', '🩺 อาการ'], ['cause_type', '🏷️ ประเภทสาเหตุ'], ['cause', '🔍 สาเหตุ'],
+    ['fix', '🛠️ วิธีแก้'], ['parts_used', '📦 อะไหล่ที่เปลี่ยน'], ['test', '✅ ทดสอบหลังซ่อม'], ['prevent', '💡 ข้อเสนอป้องกัน/ปรับปรุง']];
+  const UNKNOWN_RE = /^(ไม่ทราบ|ยังไม่ทราบ)$/;
+  function repairView(r) {
+    let h = '<div class="repair-view">' + (r.summary ? '<p class="repair-sum">' + esc(r.summary) + '</p>' : '');
+    if (r.product || r.serial) h += '<div class="info-row"><span class="muted">สินค้า</span><span>' + esc([r.product, r.serial && 'SN ' + r.serial].filter(Boolean).join(' · ')) + '</span></div>';
+    REPAIR_ROWS.forEach(([k, label]) => {
+      if (!r[k]) return;
+      h += '<div class="repair-row"><span class="muted">' + label + '</span><span' + (UNKNOWN_RE.test(r[k]) ? ' class="muted"' : '') + '>' + esc(r[k]) + '</span></div>';
+    });
+    return h + '</div>';
+  }
+  function repairHtml(data) {
+    const j = data.job, r = data.repair;
+    if (j.status === 'ยกเลิก' || j.status === 'รวมกับงานอื่น') return '';
+    let h = '<div class="panel-box repair-box' + (j.closed && !(r && r.state === 'ยืนยันแล้ว') ? ' need' : '') + '"><div class="row"><b>📋 สรุปการซ่อม</b>';
+    if (r && r.state === 'ยืนยันแล้ว') {
+      return h + '<button class="btn" id="repair-go">✏️ แก้</button></div>' + repairView(r) +
+        '<div class="muted small">ยืนยันโดย ' + esc(r.confirmedBy) + ' · ' + esc(fmtDate(r.confirmedAt)) + '</div></div>';
+    }
+    return h + '</div><p class="muted small">' + (r ? 'มีร่างค้างไว้ (' + esc(r.state) + ') กดทำต่อได้'
+      : j.closed ? '⚠️ งานปิดแล้วแต่ยังไม่มีสรุปการซ่อม — ใครในทีมก็สรุปได้'
+      : 'ซ่อมเสร็จแล้ว ใส่รูป/คลิป แล้วพูดเล่าว่าเสียตรงไหน เพราะอะไร แก้อย่างไร AI สรุปเป็นหัวข้อให้') + '</p>' +
+      '<button class="btn primary" id="repair-go">📋 ' + (r ? 'ทำสรุปต่อ' : 'สรุปการซ่อม') + '</button></div>';
+  }
+  function wireRepair(data) {
+    const b = document.getElementById('repair-go');
+    if (b) b.onclick = () => repairSheet(data);
+  }
+
+  /** เปิดหน้าต่างสรุป: มีคำถามค้าง → ตอบ · มีร่าง → ตรวจ/แก้ · ไม่มี → เล่า (note = ข้อความตั้งต้น เช่น สรุปการแก้ไขตอนปิด) */
+  function repairSheet(data, note) {
+    const r = data.repair;
+    if (r && r.state === 'ถามต่อ' && r.questions.length) return repairAsk(data);
+    if (r && !note) return repairEdit(data);
+    repairTell(data, note || '');
+  }
+
+  async function repairRun(data, payload) {
+    sheet('<div class="center"><div class="pop-ok">🤖</div><p>AI กำลังอ่านแชท โน้ต และรูปของงานนี้…</p><p class="muted small">ประมาณ 10–30 วินาที</p></div>');
+    try {
+      const out = await core('repairDraft', Object.assign({ no: data.job.no }, payload), 60000);
+      data.repair = out.report;
+      if (state.jobData && state.jobData.job.no === data.job.no && /^#job\//.test(location.hash)) { state.jobData.repair = out.report; drawJob(state.jobData); }
+      repairSheet(data);
+    } catch (err) {
+      if (err.message === 'login') return;
+      toast('⚠️ ' + err.message);
+      if (data.repair) repairSheet(data); else closeSheet();
+    }
+  }
+
+  function repairTell(data, note) {
+    const keys = [];
+    sheet('<h2>📋 สรุปการซ่อม ' + esc(data.job.no) + '</h2>' +
+      '<p class="muted small">เล่าให้ครบ: <b>เสียตรงไหน · เพราะอะไร · แก้อย่างไร · เปลี่ยนอะไหล่อะไร · ทดสอบแล้วเป็นอย่างไร</b><br>AI อ่านแชทและโน้ตในงานนี้ด้วย ไม่ต้องเล่าซ้ำเรื่องที่คุยไว้แล้ว</p>' +
+      '<div class="row-gap"><label class="btn"><input type="file" id="r-pick" accept="image/*,video/*" multiple hidden>📷 รูป / คลิปจุดที่เสีย</label><span id="r-files" class="muted small"></span></div>' +
+      '<label class="field"><span class="lbl">เล่าการซ่อม</span><textarea id="f-note" rows="5" maxlength="2000" placeholder="เช่น สายคันเร่งขาดตรงข้อพับ เพราะเสียดสีกับขอบเหล็ก เปลี่ยนสายใหม่ ใส่ปลอกยางกัน ลองเร่งเครื่อง 10 นาทีปกติ">' + esc(note) + '</textarea></label>' +
+      (Speech ? '<button type="button" class="btn" id="mic">🎤 กดแล้วพูด</button>' : '') +
+      '<p class="muted small">พูดแทนพิมพ์ได้: แตะช่องข้างบน แล้วกดรูปไมค์ 🎤 บนคีย์บอร์ดมือถือ</p>' +
+      '<div class="actions"><button class="btn primary" id="r-go">🤖 ให้ AI สรุป</button>' + (data.repair ? '<button class="btn" id="r-back">‹ กลับไปร่าง</button>' : '') +
+      '<button class="btn" data-close>ไว้ทีหลัง</button></div>', el => {
+      wireMic(el);
+      const info = el.querySelector('#r-files');
+      let uploading = 0;
+      el.querySelector('#r-pick').onchange = async e => {
+        const picked = [...e.target.files];
+        e.target.value = '';
+        uploading += picked.length;
+        info.textContent = 'กำลังส่ง ' + picked.length + ' ไฟล์…';
+        for (const f of picked) {
+          try { keys.push(await uploadFile(f)); } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
+          uploading--;
+        }
+        info.textContent = keys.length ? '✅ ' + keys.length + ' ไฟล์' : '';
+      };
+      const back = el.querySelector('#r-back');
+      if (back) back.onclick = () => repairEdit(data);
+      el.querySelector('#r-go').onclick = () => {
+        if (uploading) return toast('รอส่งรูป/คลิปให้เสร็จก่อน');
+        const text = el.querySelector('#f-note').value.trim();
+        if (!text && !keys.length && !data.repair) { toast('เล่าการซ่อม หรือใส่รูปก่อน'); el.querySelector('#f-note').focus(); return; }
+        repairRun(data, { note: text, files: keys });
+      };
+    });
+  }
+
+  function repairAsk(data) {
+    const qs = data.repair.questions;
+    sheet('<h2>🤖 AI ขอถามเพิ่ม</h2><p class="muted small">ตอบเท่าที่รู้ (พิมพ์หรือพูด) ข้อไหนไม่รู้เว้นไว้ได้</p>' +
+      qs.map((q, i) => '<label class="field"><span class="lbl">' + (i + 1) + '. ' + esc(q) + '</span><textarea data-ans="' + i + '" rows="2" maxlength="800"></textarea></label>' +
+        (SPEECH ? '<button type="button" class="btn mic" data-micfor="' + i + '">🎤 พูด</button>' : '')).join('') +
+      '<div class="actions"><button class="btn primary" id="r-go">ตอบแล้วสรุป</button><button class="btn" id="r-final">ไม่รู้ สรุปเลย</button>' +
+      '<button class="btn" data-close>ไว้ทีหลัง</button></div>', el => {
+      el.querySelectorAll('[data-micfor]').forEach(b => b.onclick = () => listen(b, el.querySelector('[data-ans="' + b.dataset.micfor + '"]')));
+      const answers = () => qs.map((q, i) => el.querySelector('[data-ans="' + i + '"]').value.trim());
+      el.querySelector('#r-go').onclick = () => {
+        const a = answers();
+        if (!a.some(Boolean)) return toast('ยังไม่ได้ตอบ — ไม่รู้กด "ไม่รู้ สรุปเลย"');
+        repairRun(data, { answers: a });
+      };
+      el.querySelector('#r-final').onclick = () => repairRun(data, { answers: answers(), final: true });
+    });
+  }
+
+  function repairEdit(data) {
+    const r = data.repair, opts = data.repairOpts || { systems: [], causes: [] };
+    const sel = (k, list) => '<select data-rk="' + k + '">' + list.map(v => '<option' + (v === r[k] ? ' selected' : '') + '>' + esc(v) + '</option>').join('') + '</select>';
+    const area = (k, rows) => '<textarea data-rk="' + k + '" rows="' + rows + '">' + esc(r[k]) + '</textarea>';
+    const fld = (label, inner) => '<label class="field"><span class="lbl">' + label + '</span>' + inner + '</label>';
+    sheet('<h2>📋 ตรวจสรุปการซ่อม ' + esc(data.job.no) + '</h2><p class="muted small">AI สรุปให้แล้ว แก้ช่องที่ไม่ถูกได้เลย แล้วกดยืนยัน</p>' +
+      fld('สรุปสั้น', area('summary', 2)) +
+      fld('สินค้า/รุ่น', '<input data-rk="product" value="' + esc(r.product) + '">') + fld('SN', '<input data-rk="serial" value="' + esc(r.serial) + '">') +
+      REPAIR_ROWS.map(([k, label]) => fld(label, k === 'system' ? sel(k, opts.systems) : k === 'cause_type' ? sel(k, opts.causes) : area(k, ['cause', 'fix', 'prevent'].includes(k) ? 3 : 2))).join('') +
+      '<div class="actions"><button class="btn primary" id="r-ok">✅ ยืนยันสรุป</button><button class="btn" id="r-more">🗣️ เล่าเพิ่ม ให้ AI สรุปใหม่</button>' +
+      '<button class="btn" data-close>ไว้ทีหลัง</button></div>', el => {
+      el.querySelector('#r-more').onclick = () => repairTell(data, '');
+      el.querySelector('#r-ok').onclick = async e => {
+        const report = {};
+        el.querySelectorAll('[data-rk]').forEach(x => { report[x.dataset.rk] = x.value.trim(); });
+        if (!report.part && !report.fix) return toast('ใส่ชิ้นส่วนที่เสีย หรือวิธีแก้ อย่างน้อย 1 ช่อง');
+        busy(e.target);
+        try {
+          const out = await core('repairSave', { no: data.job.no, report });
+          data.repair = out.report;
+          closeSheet();
+          if (state.jobData && state.jobData.job.no === data.job.no && /^#job\//.test(location.hash)) {
+            state.jobData.repair = out.report;
+            const page = await api('job', { no: data.job.no });   // แถว "สรุปการซ่อม" ในไทม์ไลน์
+            if (/^#job\//.test(location.hash)) drawJob(page);
+          }
+          toast('บันทึกสรุปการซ่อมแล้ว ✅ ขอบคุณครับ');
+        } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
     });
   }
@@ -1463,7 +1745,8 @@
     'เครื่องเจาะคอริ่ง (น้ำเงิน 3500W)', 'หุ่นยนต์ตัดลวด (wire saw)', 'เครื่องต๊าป 4 นิ้ว', 'เครื่องย้ำโซ่', 'เครื่องปั่นไฟ TREX'];
   const CORE_ERRORS = {
     bad_phone: 'เบอร์โทรต้องมีอย่างน้อย 9 หลัก', no_symptom: 'ใส่อาการก่อน', no_contact: 'ใส่ชื่อลูกค้า หรือเบอร์ อย่างใดอย่างหนึ่ง', no_photo: 'ใส่รูปหรือคลิปอย่างน้อย 1 ไฟล์', storage_off: 'ที่เก็บรูปยังไม่เปิด แจ้งผู้ดูแล',
-    bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านรูปไม่สำเร็จ ลองใหม่',
+    bad_type: 'รองรับเฉพาะรูปและคลิป', too_big: 'ไฟล์ใหญ่เกิน 60 MB (ตัดคลิปให้สั้นลง)', bad_image: 'อ่านรูปไม่ได้', ai_failed: 'AI อ่านไม่สำเร็จ ลองใหม่', ai_budget: 'วันนี้ใช้ AI ครบวงเงินแล้ว ลองใหม่พรุ่งนี้',
+    need_note: 'เล่าการซ่อม หรือใส่รูปก่อน', need_fix: 'ใส่ชิ้นส่วนที่เสีย หรือวิธีแก้ อย่างน้อย 1 ช่อง',
     core_failed: 'บันทึกงานในระบบเดิมไม่สำเร็จ ลองใหม่', no_title: 'ข้อมูลไม่พอสำหรับตั้งชื่องาน',
     maybe_duplicate: 'อาจซ้ำกับงานที่มีอยู่แล้ว', no_name: 'ใส่ชื่อสินค้าก่อน', too_many_images: 'สินค้านี้มีรูปตัวอย่างครบ 40 รูปแล้ว ลบรูปเก่าก่อน', already_decided: 'ข้อเสนอนี้มีคนตัดสินไปแล้ว',
     no_serial: 'ใส่ SN / เลขเครื่อง (ถ่ายรูปป้ายให้ AI อ่าน หรือเลือก "ป้ายชำรุด" / "ไม่มีป้าย")',
@@ -2342,6 +2625,7 @@
       // ยกเว้นลิงก์ "เปิดหน้างาน" จากการ์ดในแชท (?job=0131) หรือ ?view=review
       const params = new URLSearchParams(location.search);
       state.fromMenu = params.get('view') === 'new';   // เมนู "แจ้งงานซ่อม" → บันทึกแล้วกลับแชท
+      state.openRepair = params.get('repair') === '1';  // ลิงก์ "สรุปการซ่อม" ที่น้องจ๊อบส่งหลังปิดงาน
       const start = params.get('job') ? '#job/' + params.get('job').replace(/\D/g, '')
         : params.get('part') ? '#part/' + params.get('part').replace(/\D/g, '') : params.get('view') === 'parts' ? '#parts'
         : params.get('view') === 'review' ? '#review' : params.get('view') === 'new' ? '#new' : params.get('view') === 'search' ? '#search' : '#board';

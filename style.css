@@ -442,3 +442,31 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .key-alert { position: relative; margin: 8px 16px 0; padding: 10px 36px 10px 12px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 14px; }
 .key-alert hr { border: 0; border-top: 1px solid rgba(255, 255, 255, .4); margin: 6px 0; }
 .key-alert button { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: #fff; font-size: 18px; cursor: pointer; }
+
+/* ---------- สรุปการซ่อม (v50) ---------- */
+.repair-box { margin: 10px 0; }
+.repair-box .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.repair-box.need { border-color: var(--warn); }
+.repair-sum { margin: 4px 0 8px; font-weight: 600; }
+.repair-row { display: flex; flex-direction: column; padding: 5px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.repair-row > span:first-child { font-size: 12px; }
+.repair-row > span:last-child { overflow-wrap: anywhere; white-space: pre-wrap; }
+.row-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+#sheet .center .pop-ok { font-size: 48px; }
+
+/* ---------- สรุปงานประจำวัน + QR (v50) ---------- */
+.view-toggle { gap: 8px; }
+.day-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.day-nav b { font-size: 16px; text-align: center; flex: 1; }
+.note-flag { display: block; padding: 8px 12px; border-radius: 10px; margin-bottom: 10px; font-size: 14px; background: var(--chip); color: var(--text); text-decoration: none; }
+.note-flag.warn { background: rgba(217, 119, 6, .14); border: 1px solid var(--warn); }
+.note-flag.ok { background: rgba(6, 199, 85, .12); }
+ul.plain { list-style: none; margin: 0 0 8px; padding: 0; }
+ul.plain li { padding: 5px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
+ul.plain li:first-child { border-top: 0; }
+.pill.ok { background: rgba(6, 199, 85, .14); }
+.pill.warn { background: rgba(217, 119, 6, .16); }
+.qr-card { text-align: center; border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+.qr-card .qr-img img { width: 100%; max-width: 260px; height: auto; border-radius: 8px; }
+.qr-card .actions { justify-content: center; }
+.poster-img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; }
