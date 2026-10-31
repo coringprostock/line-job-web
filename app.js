@@ -918,12 +918,11 @@
       const data = await api('update', Object.assign({ no }, changes));
       closeSheet();
       if (/^#job\//.test(location.hash)) drawJob(data);
-      if (changes.status === 'ปิด') { // ป๊อปอัปปิดงาน (ผู้ใช้ 26 ต.ค. 2569) · น้องจ๊อบทักคนปิดในแชทด้วย
+      if (changes.status === 'ปิด') { // ป๊อปอัปปิดงาน (ผู้ใช้ 26 ต.ค. 2569) · น้องจ๊อบทักคนปิดในแชทด้วย · AI สรุปการซ่อมเอง (31 ต.ค.)
         sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>ปิดงานแล้ว</h2><div class="big-no">' + esc(no) + '</div>' +
           '<p>ขอบคุณครับ 🙏</p><p class="muted small">น้องจ๊อบส่งสรุปไว้ในแชทให้แล้ว</p>' +
-          '<p><b>ต่ออีกนิด: สรุปการซ่อม</b><br><span class="muted small">ใส่รูป/พูดเล่าว่าเสียตรงไหน เพราะอะไร AI สรุปเป็นหัวข้อ เก็บเป็นประวัติของรุ่นนี้</span></p>' +
-          '<div class="actions"><button class="btn primary" id="f-repair">📋 สรุปการซ่อมเลย</button><button class="btn" data-close>ไว้ทีหลัง</button></div></div>',
-          el => { el.querySelector('#f-repair').onclick = () => repairSheet(data, changes.note); });
+          '<p>🤖 <b>AI จะสรุปการซ่อมให้เอง</b><br><span class="muted small">อ่านจากสรุปการแก้ไขและไทม์ไลน์ของงาน ใน 1–2 นาที ขึ้นเป็นกรอบ “📋 สรุปการซ่อม” ในหน้างาน อ่าน/แก้ทีหลังได้</span></p>' +
+          '<div class="actions"><button class="btn primary" data-close>ตกลง</button></div></div>');
       } else toast(okMsg + ' ✅');
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message);
@@ -960,16 +959,7 @@
   function statusSheet(data, status) {
     const waiting = data.waitingCustomer.indexOf(status) >= 0;
     const closing = status === 'ปิด' && data.job.status !== 'ปิด';
-    const miss = closing ? (data.closeMissing || []) : [];
-    if (miss.length) { // ปิดงานต้องมี รูป อาการ ชื่อลูกค้า เบอร์ ครบก่อน (Worker ตรวจซ้ำ)
-      return sheet('<h2>ยังปิดงานไม่ได้</h2><p>ต้องเติมข้อมูลให้ครบก่อน: <b>' + esc(miss.join(', ')) + '</b></p>' +
-        '<div class="actions">' + (miss.some(m => m !== 'รูป') ? '<button class="btn primary" id="f-fill">✏️ เติมข้อมูลงาน</button>' : '') +
-        (miss.includes('รูป') ? '<button class="btn' + (miss.length === 1 ? ' primary' : '') + '" id="f-photo">📷 เพิ่มรูป</button>' : '') +
-        '<button class="btn" data-close>ปิด</button></div>', el => {
-        const f = el.querySelector('#f-fill'); if (f) f.onclick = () => infoSheet(data, true);
-        const ph = el.querySelector('#f-photo'); if (ph) ph.onclick = () => { closeSheet(); document.getElementById('info-pick').click(); };
-      });
-    }
+    // ปิดงาน = ใส่สรุปการแก้ไขอย่างเดียว (ผู้ใช้ 31 ต.ค. 2569 · ข้อมูลงานไม่บังคับแล้ว) → AI สรุปการซ่อมให้เองหลังปิด
     const html = '<h2>เปลี่ยนเป็น “' + esc(status) + '”</h2>' +
       '<p class="muted small">' + esc(data.job.no) + ' ' + esc(data.job.title) + ' · ตอนนี้: ' + esc(data.job.status) + '</p>' +
       (status === 'ปิด' || status === 'ยกเลิก' ? '' :
@@ -1012,7 +1002,13 @@
       return h + '<button class="btn" id="repair-go">✏️ แก้</button></div>' + repairView(r) +
         '<div class="muted small">ยืนยันโดย ' + esc(r.confirmedBy) + ' · ' + esc(fmtDate(r.confirmedAt)) + '</div></div>';
     }
+    if (r && r.state === 'ร่าง') {   // ร่าง (AI สรุปเองหลังปิด หรือคนให้ AI สรุปแล้วยังไม่ยืนยัน) → อ่านได้เลย
+      return h + '<button class="btn" id="repair-go">✏️ อ่าน/แก้ แล้วยืนยัน</button></div>' + repairView(r) +
+        '<div class="muted small">' + (r.by === 'AI' ? '🤖 AI สรุปจากสรุปการแก้ไขและไทม์ไลน์' : '🤖 ร่างจาก AI') + ' · ' + esc(fmtDate(r.updated)) + ' · ยังไม่มีคนยืนยัน</div></div>';
+    }
+    const soon = j.closed && !r && j.closedAt && Date.now() - new Date(j.closedAt).getTime() < 10 * 60000;
     return h + '</div><p class="muted small">' + (r ? 'มีร่างค้างไว้ (' + esc(r.state) + ') กดทำต่อได้'
+      : soon ? '🤖 AI กำลังสรุปจากสรุปการแก้ไขและไทม์ไลน์ (1–2 นาที) — รีเฟรชหน้านี้เพื่อดู'
       : j.closed ? '⚠️ งานปิดแล้วแต่ยังไม่มีสรุปการซ่อม — ใครในทีมก็สรุปได้'
       : 'ซ่อมเสร็จแล้ว ใส่รูป/คลิป แล้วพูดเล่าว่าเสียตรงไหน เพราะอะไร แก้อย่างไร AI สรุปเป็นหัวข้อให้') + '</p>' +
       '<button class="btn primary" id="repair-go">📋 ' + (r ? 'ทำสรุปต่อ' : 'สรุปการซ่อม') + '</button></div>';
@@ -1134,7 +1130,7 @@
   function infoHtml(data) {
     const i = data.info;
     if (!i) return '';
-    const miss = data.job.closed ? [] : (data.closeMissing || []);
+    const miss = data.job.closed ? [] : (data.infoMissing || []);
     let h = '<div class="panel-box info-box"><div class="row"><b>ข้อมูลงาน</b><button class="btn" id="info-edit">✏️ แก้ข้อมูลงาน</button></div>';
     INFO_ROWS.forEach(([k, label]) => {
       const v = k === 'phone' && i.phone ? fmtPhoneTh(i.phone) : i[k];
@@ -1145,7 +1141,7 @@
     if (files.length) h += '<div class="files">' + files.map(f => '<div class="file" data-fkey="' + esc(f.key) + '" data-ftype="' + f.type + '" data-furl="' + esc(f.url) + '">' +
       (f.type === 'image' ? '<img loading="lazy" src="' + esc(f.url) + '" alt="">' : '<div class="vid">🎬</div>') + '</div>').join('') + '</div>';
     h += '<label class="btn"><input type="file" id="info-pick" accept="image/*,video/*" multiple hidden>📷 เพิ่มรูป / คลิป</label>';
-    if (miss.length) h += '<div class="flag-due small">📝 ก่อนปิดงานต้องเติม: ' + esc(miss.join(', ')) + '</div>';
+    if (miss.length) h += '<div class="flag-due small">📝 ยังไม่มี (เติมได้ ไม่บังคับ): ' + esc(miss.join(', ')) + '</div>';
     return h + '</div>';
   }
   const fmtPhoneTh = d => d.length === 10 ? d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6) : d;
@@ -1169,16 +1165,15 @@
       } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
     };
   }
-  // ช่องที่ต้องมีก่อนปิดงาน (ตรงกับ closeMissing ใน Worker) · ผ่าน = ค่าที่กรอกใช้ได้
+  // ช่องที่ควรมี (ตรงกับ closeMissing ใน Worker → jobPage.infoMissing · ไม่บังคับปิดแล้ว 31 ต.ค.) · ผ่าน = ค่าที่กรอกใช้ได้
   const CLOSE_NEED = { customer: ['ชื่อลูกค้า', v => !!v.trim()], phone: ['เบอร์', v => v.replace(/\D/g, '').length >= 9], symptom: ['อาการ', v => !!v.trim()] };
-  // closing = มาจากกดปิดงานแล้วข้อมูลไม่ครบ → บันทึกครบแล้วไปหน้าปิดงานต่อ
-  function infoSheet(data, closing) {
+  function infoSheet(data) {
     const i = data.info || {};
-    const miss = data.job.closed ? [] : (data.closeMissing || []);
+    const miss = data.job.closed ? [] : (data.infoMissing || []);
     const opt = (list, cur) => '<option value=""></option>' + list.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
-    // ช่องที่ขาดก่อนปิด: กรอบแดง + ป้าย "ต้องกรอกก่อนปิดงาน" · กรอกถูกแล้วเปลี่ยนเป็นเขียว "✓ ได้แล้ว"
+    // ช่องที่ยังว่าง: กรอบ + ป้าย "ยังว่าง" · กรอกถูกแล้วเปลี่ยนเป็นเขียว "✓ ได้แล้ว"
     const fld = (k, label, inner) => '<label class="field' + (CLOSE_NEED[k] && miss.includes(CLOSE_NEED[k][0]) ? ' need' : '') + '" data-k="' + k + '"><span class="lbl">' + label +
-      (CLOSE_NEED[k] && miss.includes(CLOSE_NEED[k][0]) ? ' <span class="need-tag">ต้องกรอกก่อนปิดงาน</span>' : '') + '</span>' + inner + '</label>';
+      (CLOSE_NEED[k] && miss.includes(CLOSE_NEED[k][0]) ? ' <span class="need-tag">ยังว่าง</span>' : '') + '</span>' + inner + '</label>';
     sheet('<h2>แก้ข้อมูลงาน ' + esc(data.job.no) + '</h2>' +
       fld('customer', 'ชื่อลูกค้า / ร้าน', '<input id="i-customer" maxlength="80" value="' + esc(i.customer || '') + '">') +
       fld('phone', 'เบอร์ลูกค้า', '<input id="i-phone" type="tel" inputmode="tel" value="' + esc(i.phone || '') + '">') +
@@ -1194,7 +1189,7 @@
         const check = () => {
           const ok = CLOSE_NEED[k][1](input.value);
           box.classList.toggle('ok', ok);
-          tag.textContent = ok ? '✓ ได้แล้ว' : k === 'phone' && input.value.trim() ? 'เบอร์ยังไม่ครบ (อย่างน้อย 9 หลัก)' : 'ต้องกรอกก่อนปิดงาน';
+          tag.textContent = ok ? '✓ ได้แล้ว' : k === 'phone' && input.value.trim() ? 'เบอร์ยังไม่ครบ (อย่างน้อย 9 หลัก)' : 'ยังว่าง';
         };
         input.addEventListener('input', check);
         check();
@@ -1210,9 +1205,7 @@
           const out = await core('editInfo', { no: data.job.no, info });
           closeSheet();
           if (/^#job\//.test(location.hash)) drawJob(out);
-          const left = out.closeMissing || [];
-          if (closing && !left.length) return statusSheet(out, 'ปิด');   // ครบแล้ว → ใส่สรุปการแก้ไขแล้วปิดงานต่อได้เลย
-          toast('บันทึกข้อมูลงานแล้ว ✅' + (closing && left.length ? ' · ยังขาด ' + left.join(', ') : ''));
+          toast('บันทึกข้อมูลงานแล้ว ✅');
         } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
     });
@@ -1867,7 +1860,6 @@
     } finally { clearTimeout(timer); }
     if (out.ms) console.log('core', action, out.ms + ' ms');
     if (out.error === 'login_expired' || out.error === 'login_required') { liff.login({ redirectUri: location.href }); throw new Error('login'); }
-    if (out.error === 'need_details') { const e = new Error('ปิดงานไม่ได้ ยังขาด: ' + (out.missing || []).join(', ') + ' — กด ✏️ แก้ข้อมูลงาน เติมก่อน'); e.code = out.error; e.missing = out.missing; throw e; }
     if (out.error) { const e = new Error(CORE_ERRORS[out.error] || ERRORS[out.error] || out.error); e.code = out.error; e.dupes = out.dupes; throw e; }
     if (action === 'me' && out.primary && out.primary !== state.primary) setPrimary(out.primary);
     return out;
@@ -2216,7 +2208,7 @@
         noDigits(d.no) + '">เปิดหน้างาน</a><a class="btn" href="#new">เปิดงานอื่น</a></div></div>';
       sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>เปิดงานเรียบร้อยแล้ว</h2><div class="big-no">' + esc(d.no) + '</div>' +
         '<p>' + (d.dm ? 'จ๊อบส่งการ์ดสรุปงานให้ในแชทแล้ว' : 'งานเปิดแล้ว (ส่งการ์ดในแชทไม่สำเร็จ ดูงานได้ที่บอร์ด)') + (d.card ? ' · ส่งการ์ดเข้ากลุ่มหลักแล้ว' : '') + '</p>' +
-        (d.later && d.later.length ? '<p class="flag-due small">📝 ก่อนปิดงานต้องเติม: ' + esc(d.later.join(', ')) + '</p>' : '') +
+        (d.later && d.later.length ? '<p class="flag-due small">📝 เติมทีหลังได้: ' + esc(d.later.join(', ')) + '</p>' : '') +
         '<p class="muted small" id="back-note">กำลังกลับไปที่แชท…</p>' +
         '<div class="actions"><button class="btn primary" id="go-chat">กลับแชทเลย</button><a class="btn" href="#job/' + noDigits(d.no) + '">อยู่ต่อ ดูหน้างาน</a></div></div>', el => {
         el.querySelector('#go-chat').onclick = () => liff.closeWindow();
@@ -2233,7 +2225,7 @@
     // ป๊อปอัป "เปิดงานเรียบร้อยแล้ว" (ผู้ใช้ขอ 26 ต.ค. 2569) · ปิดแล้วเห็นหน้าป้าย QR ด้านล่าง
     sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>' + (d.attached ? 'เพิ่มเข้างานเรียบร้อยแล้ว' : 'เปิดงานเรียบร้อยแล้ว') + '</h2>' +
       '<div class="big-no">' + esc(d.no) + '</div>' +
-      (d.later && d.later.length && !d.attached ? '<p class="flag-due small">📝 ก่อนปิดงานต้องเติม: ' + esc(d.later.join(', ')) + ' (เข้าหน้างาน หรือสแกน QR ที่ป้าย)</p>' : '') +
+      (d.later && d.later.length && !d.attached ? '<p class="flag-due small">📝 เติมทีหลังได้: ' + esc(d.later.join(', ')) + ' (เข้าหน้างาน หรือสแกน QR ที่ป้าย)</p>' : '') +
       '<div class="actions"><button class="btn primary" data-close>ตกลง</button><a class="btn" href="#job/' + noDigits(d.no) + '">' +
       (d.later && d.later.length ? '📝 เพิ่มรายละเอียดงาน' : 'เปิดหน้างาน') + '</a></div></div>', el => {
       el.querySelector('a.btn').onclick = () => closeSheet();
