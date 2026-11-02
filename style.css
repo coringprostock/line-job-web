@@ -116,20 +116,30 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
 .sb-bar { display: flex; gap: 3px; margin-bottom: 12px; }
 .sb-bar span { flex: 1; height: 6px; border-radius: 3px; background: var(--line); }
 .sb-bar span.on { background: var(--ph); }
-.sb-next {
+.btn.sb-next {
   display: block; width: 100%; padding: 14px; font-size: 17px; font-weight: 700; border-radius: 12px;
   background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 6px rgba(0, 0, 0, .12);
 }
-.sb-next.close { background: #1baf7a; border-color: #1baf7a; color: #fff; }
+.btn.sb-next.close { background: #1baf7a; border-color: #1baf7a; color: #fff; }
 .sb-hint { font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
-.sb-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.sb-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 18px; row-gap: 12px; }
 .sb-chip {
-  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; min-height: 64px;
-  border: 1.5px solid var(--ph); border-radius: 10px; background: var(--card); color: var(--text);
-  font: inherit; font-size: 13px; line-height: 1.25; text-align: center; cursor: pointer; word-break: break-word;
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 6px 4px; min-height: 54px; border: 1.5px solid var(--ph); border-radius: 10px; background: var(--card); color: var(--text);
+  font: inherit; font-size: 12.5px; line-height: 1.2; text-align: center; cursor: pointer; word-break: break-word;
 }
+/* เส้นเชื่อมแบบไทม์ไลน์: ในแถว = เส้นในช่องว่างระหว่างกรอบ · ท้ายแถว/ต้นแถวถัดไป = เส้นออกไปขอบกล่อง (ต่อขึ้นบรรทัดใหม่) */
+.sb-chip::after, .sb-chip::before {
+  content: ""; position: absolute; top: 50%; height: 2px; margin-top: -1px; background: var(--line); pointer-events: none;
+}
+.sb-chip::after { left: 100%; width: 19px; }
+.sb-chip:nth-child(3n)::after { width: 16px; }
+.sb-chip:last-child::after { display: none; }
+.sb-chip::before { display: none; right: 100%; width: 16px; }
+.sb-chip:nth-child(3n+1):not(:first-child)::before { display: block; }
+.sb-chip.past::after, .sb-chip.current::before, .sb-chip.past::before { background: var(--ph); }
 .sb-chip .n {
-  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
   background: var(--ph-bg); color: var(--ph);
 }
 .sb-chip:active { transform: scale(.97); }
