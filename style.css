@@ -143,7 +143,7 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
   background: var(--ph-bg); color: var(--ph);
 }
 .sb-chip:active { transform: scale(.97); }
-.sb-chip.past { background: var(--ph-bg); color: var(--muted); }
+.sb-chip.past { background: var(--ph-closed-bg); border-color: var(--line); color: var(--muted); }
 .sb-chip.past .n { background: var(--ph); color: #fff; }
 .sb-chip.current { background: var(--ph); border-color: var(--ph); color: #fff; font-weight: 700; cursor: default; opacity: 1; }
 .sb-chip.current .n { background: #fff; color: var(--ph); }
