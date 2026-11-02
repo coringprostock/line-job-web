@@ -470,3 +470,9 @@ ul.plain li:first-child { border-top: 0; }
 .qr-card .qr-img img { width: 100%; max-width: 260px; height: auto; border-radius: 8px; }
 .qr-card .actions { justify-content: center; }
 .poster-img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+
+/* หน้าล็อกคนนอก staff (2 พ.ย. 2569) */
+.lockout { padding: 64px 24px; text-align: center; }
+.lockout .lock-icon { font-size: 56px; margin-bottom: 8px; }
+.lockout h2 { margin: 8px 0; font-size: 20px; }
+.lockout .btn { margin-top: 16px; }

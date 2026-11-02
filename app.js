@@ -24,7 +24,7 @@
   };
   const SHORT = { 'รอลูกค้าคอนเฟิร์ม': 'รอคอนเฟิร์ม', 'เสร็จ รอลูกค้ารับ': 'เสร็จ รอรับ', 'รอใบเสนอราคา': 'รอใบเสนอราคา' };
   const ERRORS = {
-    not_staff: 'บัญชี LINE นี้ยังไม่อยู่ในชีต Staff — ให้พิมพ์ข้อความในกลุ่มงานสักครั้ง แล้วให้ผู้ดูแลใส่ชื่อในชีต Staff',
+    not_staff: 'บัญชี LINE นี้ใช้ระบบไม่ได้ — สำหรับทีมงาน CORING PRO เท่านั้น',
     not_configured: 'ระบบยังตั้งค่าไม่ครบ (LINE_LOGIN_CHANNEL_ID) แจ้งผู้ดูแล',
     not_found: 'ไม่พบงานนี้', bad_status: 'สถานะไม่ถูกต้อง', past_date: 'วันตามต้องเป็นวันนี้หรือหลังจากนี้',
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
@@ -356,16 +356,16 @@
   }
 
   // ---------- QR เข้าระบบเร็ว (ผู้ใช้ 31 ต.ค. 2569: หาแชทน้องจ๊อบในไลน์ไม่เจอ) · โปสเตอร์ A4 ติดในแผนก ----------
-  // เปิดงาน = LIFF ?view=new (หน้าแจ้งงานซ่อม · บันทึกแล้วปิดกลับแชท) · ระบบ = LIFF เฉยๆ (บอร์ดงาน) · แชท = oaMessage ของน้องจ๊อบ
+  // เปิดงาน = LIFF ?view=new (หน้าแจ้งงานซ่อม · บันทึกแล้วปิดกลับแชท) · ระบบ = LIFF เฉยๆ (บอร์ดงาน) · แชท = ti/p ของน้องจ๊อบ (2 พ.ย. 2569: oaMessage เปิดช่องพิมพ์แทนเมนู · ti/p เข้าแชทแล้วเมนูกางรอ)
   // โปสเตอร์สไตล์บัตรเข้างานกีฬาใหญ่ 2026 (ผู้ใช้ 31 ต.ค. 2569 · ไม่ใช้โลโก้/ถ้วย FIFA) · QR บนพื้นขาวขอบเงียบ ≥4 ช่อง
   const JOP_ID = '@696abybi';
   const QR_ITEMS = () => [
     { key: 'new', url: 'https://liff.line.me/' + CFG.LIFF_ID + '?view=new', title: '📝 เปิด Job', sub: 'สแกนเปิดงานซ่อม · บันทึกแล้วน้องจ๊อบส่งการ์ดยืนยันในแชท',
       en: 'OPEN JOB', th: 'เปิด Job', badge: 'สแกนเปิดงานซ่อม', pal: ['#FF4F12', '#E6007E', '#FFC400', '#1B1B3A'], code: 'CP-SVC-2026', fields: [['ACCESS', 'เปิดงาน'], ['ZONE', 'ทีมช่าง'], ['OPEN', '24 ชม.']],
       steps: ['เปิดกล้องมือถือ หรือ LINE › สแกน QR', 'เข้าหน้าเปิดงานซ่อมทันที (ครั้งแรกกดอนุญาต)', 'ถ่ายรูปเครื่อง ป้าย SN ใส่ลูกค้า › กดบันทึก'] },
-    { key: 'jop', url: 'https://line.me/R/oaMessage/' + JOP_ID + '/', title: '💬 หลังบ้าน (น้องJob-ผู้ช่วยดูงาน)', sub: 'สแกนแล้วเข้าแชทน้องจ๊อบ คุย/ส่งรูปเปิดงาน และกดเมนูเข้าบอร์ดงาน (ยังไม่เป็นเพื่อน = เพิ่มเพื่อนก่อน)',
-      avatar: 'jop.jpg?v=51', en: 'JOB ASSISTANT', th: 'หลังบ้าน (น้องJob-ผู้ช่วยดูงาน)', badge: 'LINE ' + JOP_ID, pal: ['#00A651', '#00C9A7', '#FFD200', '#0B3B2E'], code: 'CP-BOT-2026', fields: [['NAME', 'น้องจ๊อบ'], ['LINE', JOP_ID], ['OPEN', '24 ชม.']],
-      steps: ['สแกน › เพิ่มเพื่อน › เข้าแชทน้องจ๊อบ', 'คุย ส่งรูป เล่าอาการ › น้องจ๊อบช่วยเปิดงาน', 'กดเมนูในแชท › บอร์ดงาน ค้นหา อะไหล่'] }];
+    { key: 'jop', url: 'https://line.me/R/ti/p/' + encodeURIComponent(JOP_ID), title: '💬 กระดานงาน (Officeช่าง)', sub: 'สแกนแล้วเข้าหน้าน้องจ๊อบ › กดแชท เมนูขึ้นรอ (กระดานงาน แจ้งงาน ถอดอะไหล่) · ยังไม่เป็นเพื่อน = เพิ่มเพื่อนก่อน',
+      avatar: 'jop.jpg?v=51', en: 'JOB ASSISTANT', th: 'กระดานงาน (Officeช่าง)', badge: 'LINE ' + JOP_ID, pal: ['#00A651', '#00C9A7', '#FFD200', '#0B3B2E'], code: 'CP-BOT-2026', fields: [['NAME', 'น้องจ๊อบ'], ['LINE', JOP_ID], ['OPEN', '24 ชม.']],
+      steps: ['สแกน › เพิ่มเพื่อน / กดแชท › เมนูขึ้นรอ', 'คุย ส่งรูป เล่าอาการ › น้องจ๊อบช่วยเปิดงาน', 'กดเมนูในแชท › กระดานงาน ค้นหา อะไหล่'] }];
 
   const PW = 1240, PH = 1754;   // A4 ที่ 150 dpi
   const TH = (w, px) => w + ' ' + px + 'px "Noto Sans Thai", sans-serif';
@@ -2636,7 +2636,21 @@
   }
 
   // ---------- เส้นทาง ----------
+  /** คนนอก staff (ผู้ใช้ 2 พ.ย. 2569): ไม่เห็นหน้าใดๆ ของระบบ · ซ่อนแท็บ เหลือหน้าล็อก · ข้อมูลจริงยังถูกกันที่ Worker ทุกคำขออยู่แล้ว */
+  function lockOut() {
+    state.locked = true;
+    pref('staffOk', '');
+    closeSheet();
+    document.querySelector('.topbar').hidden = true;
+    $app.innerHTML = '<div class="center lockout"><div class="lock-icon">🔒</div><h2>สำหรับทีมงาน CORING PRO เท่านั้น</h2>' +
+      '<p class="muted">บัญชี LINE นี้ยังไม่มีสิทธิ์ใช้ระบบ</p>' +
+      '<p class="small muted">ถ้าเป็นทีมงาน: พิมพ์อะไรก็ได้ในกลุ่มช่าง 1 ครั้ง แล้วสแกนใหม่ (หรือแจ้งผู้ดูแลระบบ)</p>' +
+      (window.liff && liff.isInClient && liff.isInClient() ? '<button class="btn" id="lock-close">ปิด</button>' : '') + '</div>';
+    const b = document.getElementById('lock-close'); if (b) b.onclick = () => liff.closeWindow();
+  }
+
   async function route() {
+    if (state.locked) return lockOut();
     closeSheet();
     { const v = document.getElementById('viewer'); if (v) { v.hidden = true; v.innerHTML = ''; } }
     if (location.hash !== '#review') { const bar = document.getElementById('bulkbar'); if (bar) bar.remove(); }
@@ -2722,8 +2736,18 @@
       document.querySelectorAll('.tabs a').forEach(a => a.addEventListener('click', e => {
         if (a.getAttribute('href') === (location.hash || '#board')) { e.preventDefault(); route(); }
       }));
+      // ตรวจสิทธิ์ก่อนแสดงหน้า: เคยผ่านแล้ว (บัญชีเดิมในเครื่องนี้) = แสดงทันทีแล้วตรวจเบื้องหลัง · ครั้งแรก = รอผลก่อน (คนนอกไม่เห็นหน้า)
+      const uid = ((liff.getDecodedIDToken && liff.getDecodedIDToken()) || {}).sub || '';
+      const meP = core('me');
+      const known = uid && pref('staffOk') === uid;
+      if (!known) {
+        $app.innerHTML = '<div class="center muted">กำลังตรวจสิทธิ์…</div>';
+        try { await meP; } catch (e) { if (e.code === 'not_staff') return lockOut(); }
+      }
+      meP.then(() => { if (uid) pref('staffOk', uid); }, e => { if (e.code === 'not_staff') lockOut(); });
       route();
-      core('me').then(m => { setPartsBadge(m.partsBadge || 0); if (m.reviewCount !== undefined) setBadge(m.reviewCount); drawKeyAlerts(m.keyAlerts || []); }).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน) · หลังย้าย: ป้ายคิวตรวจด้วย
+      meP.then(m => { setPartsBadge(m.partsBadge || 0); if (m.reviewCount !== undefined) setBadge(m.reviewCount); drawKeyAlerts(m.keyAlerts || []); }).catch(() => {}); // ตัวเลขแท็บถอดอะไหล่ (ของมาแล้ว + รอเกินเดือน) · หลังย้าย: ป้ายคิวตรวจด้วย
+      if (state.locked) return;
       api('me').then(me => {
         state.me = me;
         // เวอร์ชันหน้าเว็บต่อท้ายชื่อ (ดูได้ว่ามือถือโหลดไฟล์ใหม่แล้วหรือยัง)
