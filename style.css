@@ -108,24 +108,36 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
 .job-head .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .icon-btn { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 2px 6px; }
 
-.stepper { display: flex; gap: 0; overflow-x: auto; margin: 16px -16px 8px; padding: 4px 16px 10px; scroll-snap-type: x proximity; }
-.step {
-  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 84px; scroll-snap-align: center;
-  border: 0; background: none; cursor: pointer; position: relative; padding: 0;
+/* กล่องสถานะงาน (2 พ.ย. 2569) — แทนแถบเลื่อนแนวนอน: เห็นทุกสถานะ ปุ่มชัด */
+.status-box { margin: 14px 0 12px; padding: 14px; border-radius: 14px; background: var(--card); border: 2px solid var(--ph); }
+.sb-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }
+.sb-count { font-weight: 600; }
+.sb-now { font-size: 22px; font-weight: 800; color: var(--ph); margin: 2px 0 8px; }
+.sb-bar { display: flex; gap: 3px; margin-bottom: 12px; }
+.sb-bar span { flex: 1; height: 6px; border-radius: 3px; background: var(--line); }
+.sb-bar span.on { background: var(--ph); }
+.sb-next {
+  display: block; width: 100%; padding: 14px; font-size: 17px; font-weight: 700; border-radius: 12px;
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 6px rgba(0, 0, 0, .12);
 }
-.step::before {
-  content: ""; position: absolute; top: 13px; left: -50%; width: 100%; height: 2px; background: var(--line); z-index: 0;
+.sb-next.close { background: #1baf7a; border-color: #1baf7a; color: #fff; }
+.sb-hint { font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+.sb-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.sb-chip {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; min-height: 64px;
+  border: 1.5px solid var(--ph); border-radius: 10px; background: var(--card); color: var(--text);
+  font: inherit; font-size: 13px; line-height: 1.25; text-align: center; cursor: pointer; word-break: break-word;
 }
-.step:first-child::before { display: none; }
-.step .dot {
-  width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); background: var(--card); z-index: 1;
-  display: grid; place-items: center; font-size: 13px; color: var(--muted);
+.sb-chip .n {
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--ph-bg); color: var(--ph);
 }
-.step .lbl { font-size: 12px; text-align: center; color: var(--muted); line-height: 1.3; }
-.step.past .dot { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
-.step.past::before, .step.current::before { background: var(--accent); }
-.step.current .dot { border-color: var(--accent); background: var(--card); color: var(--accent); box-shadow: 0 0 0 4px rgba(6, 199, 85, .18); }
-.step.current .lbl { color: var(--text); font-weight: 700; }
+.sb-chip:active { transform: scale(.97); }
+.sb-chip.past { background: var(--ph-bg); color: var(--muted); }
+.sb-chip.past .n { background: var(--ph); color: #fff; }
+.sb-chip.current { background: var(--ph); border-color: var(--ph); color: #fff; font-weight: 700; cursor: default; opacity: 1; }
+.sb-chip.current .n { background: #fff; color: var(--ph); }
+.sb-chip small { font-size: 11px; font-weight: 600; opacity: .9; }
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px; }
 .btn {

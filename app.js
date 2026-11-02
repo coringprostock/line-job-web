@@ -615,6 +615,27 @@
     if (live()) drawJob(data);
   }
 
+  // กล่องสถานะงาน (ผู้ใช้ 2 พ.ย. 2569: แถบเลื่อนแนวนอนเดิม ทีมไม่รู้ว่ากดได้/เลื่อนได้)
+  // = สถานะตอนนี้ตัวใหญ่ + ปุ่มใหญ่ "ขั้นถัดไป" + ทุกสถานะเป็นปุ่มในตาราง เห็นครบไม่ต้องเลื่อน
+  const NEXT = { 'รับแจ้ง': 'ติดต่อลูกค้า', 'ติดต่อลูกค้า': 'ตรวจเช็ค', 'ตรวจเช็ค': 'รอใบเสนอราคา', 'รอใบเสนอราคา': 'รอลูกค้าคอนเฟิร์ม',
+    'รอลูกค้าคอนเฟิร์ม': 'ซ่อม', 'ซ่อม': 'เสร็จ รอลูกค้ารับ', 'รออะไหล่': 'ซ่อม', 'เสร็จ รอลูกค้ารับ': 'ปิด' };
+  function statusBoxHtml(j, idx, off) {
+    const next = off ? '' : NEXT[j.status] || '';
+    let h = '<section class="status-box ' + ph(j.status) + '"><div class="sb-head"><span class="sb-label">สถานะงานตอนนี้</span>' +
+      (off ? '' : '<span class="sb-count">ขั้น ' + (idx + 1) + '/' + FLOW.length + '</span>') + '</div>' +
+      '<div class="sb-now">' + esc(j.status) + '</div>';
+    if (!off) h += '<div class="sb-bar">' + FLOW.map((s, i) => '<span class="' + (i <= idx ? 'on ' : '') + ph(s) + '"></span>').join('') + '</div>';
+    if (next) h += '<button class="btn sb-next' + (next === 'ปิด' ? ' close' : '') + '" data-status="' + esc(next) + '">' +
+      (next === 'ปิด' ? '✅ ปิดงาน' : 'ไปขั้นถัดไป › ' + esc(next)) + '</button>';
+    h += '<div class="sb-hint">' + (next ? 'หรือแตะเลือกสถานะอื่นด้านล่าง' : 'แตะสถานะด้านล่างเพื่อเปลี่ยน') + '</div><div class="sb-grid">';
+    FLOW.forEach((s, i) => {
+      const cls = off ? '' : i < idx ? ' past' : i === idx ? ' current' : '';
+      h += '<button class="sb-chip ' + ph(s) + cls + '" data-status="' + esc(s) + '"' + (i === idx && !off ? ' disabled' : '') + '>' +
+        '<span class="n">' + (i < idx && !off ? '✓' : i + 1) + '</span>' + esc(s) + (i === idx && !off ? '<small>ตอนนี้</small>' : '') + '</button>';
+    });
+    return h + '</div></section>';
+  }
+
   function drawJob(data) {
     const j = data.job;
     state.currentJob = j.no; // งานที่ถูกรวมเข้ามา: เหตุการณ์ของงานเดิมแสดงเลขงานกำกับ
@@ -634,14 +655,8 @@
     if (off) html += '<p><span class="pill">' + esc(j.status) + '</span></p>';
     html += '</div>';
 
+    html += statusBoxHtml(j, idx, off);
     html += infoHtml(data) + repairHtml(data);
-    html += '<div class="stepper" id="stepper">';
-    FLOW.forEach((s, i) => {
-      const cls = off ? '' : i < idx ? 'past' : i === idx ? 'current' : '';
-      html += '<button class="step ' + cls + '" data-status="' + esc(s) + '"><span class="dot">' + (i < idx && !off ? '✓' : i + 1) +
-        '</span><span class="lbl">' + esc(shortStatus(s)) + '</span></button>';
-    });
-    html += '</div>';
     html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button><button class="btn" id="reprint">🖨️ พิมพ์ป้ายซ้ำ</button>' +
       '<a class="btn" href="#part-new/' + noDigits(j.no) + '">🔧 ถอดอะไหล่ให้งานนี้</a>' +
       (j.status !== 'ยกเลิก' ? '<button class="btn danger" id="cancel">ยกเลิกงาน</button>' : '') + '</div>';
@@ -673,9 +688,7 @@
       $app.querySelectorAll('[data-tl]').forEach(x => x.classList.toggle('on', x === b));
       document.getElementById('tl').className = 'timeline' + (b.dataset.tl === 'all' ? '' : ' only-' + b.dataset.tl);
     });
-    const cur = $app.querySelector('.step.current');
-    if (cur) cur.scrollIntoView({ inline: 'center', block: 'nearest' });
-    $app.querySelectorAll('.step').forEach(btn => btn.onclick = () => statusSheet(data, btn.dataset.status));
+    $app.querySelectorAll('[data-status]').forEach(btn => btn.onclick = () => statusSheet(data, btn.dataset.status));
     document.getElementById('follow').onclick = () => followSheet(data);
     const cancel = document.getElementById('cancel');
     if (cancel) cancel.onclick = () => statusSheet(data, 'ยกเลิก');
