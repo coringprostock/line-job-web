@@ -14,8 +14,13 @@
     'ตรวจเช็ค': 'assess', 'รอใบเสนอราคา': 'assess', 'รอลูกค้าคอนเฟิร์ม': 'assess',
     'ซ่อม': 'repair', 'รออะไหล่': 'repair',
     'เสร็จ รอลูกค้ารับ': 'done',
-    'ปิด': 'closed', 'ยกเลิก': 'closed', 'รวมกับงานอื่น': 'closed'
+    'ปิด': 'closed', 'ยกเลิก': 'closed', 'รวมกับงานอื่น': 'closed',
+    'ทำใบเสนอราคา': 'start', 'รอลูกค้าตัดสิน': 'assess'   // ใบเสนอราคา (ผู้ใช้ 3 พ.ย. 2569)
   };
+  const QUOTE_KIND = 'เสนอราคา';
+  const QUOTE_OPEN = ['ทำใบเสนอราคา', 'รอลูกค้าตัดสิน'];
+  const QUOTE_ITEMS = ['อะไหล่', 'สินค้าใหม่', 'วัสดุสิ้นเปลือง', 'อื่นๆ'];
+  const isQuote = j => j && j.type === QUOTE_KIND;
   const PHASE_NAME = { start: 'เริ่มงาน', assess: 'ตรวจ / เสนอราคา', repair: 'ซ่อม', done: 'เสร็จ รอลูกค้ารับ', closed: 'ปิดแล้ว' };
   const ph = status => 'ph-' + (PHASE[status] || 'closed');
   const pref = (k, v) => { // จำตัวเลือกของคนดู (ถ้าเบราว์เซอร์ไม่ให้เก็บก็ไม่เป็นไร)
@@ -30,7 +35,9 @@
     bad_date: 'วันที่ไม่ถูกต้อง', closed: 'งานปิดแล้ว ตั้งวันตามไม่ได้', already_decided: 'มีคนตัดสินข้อนี้ไปแล้ว',
     already_in_job: 'ข้อความนี้อยู่ในงานแล้ว', not_found_job: 'ไม่พบเลขงานที่จะแนบ', not_found_part: 'ไม่พบรายการถอดอะไหล่นี้', busy: 'ระบบไม่ว่าง ลองใหม่อีกครั้ง',
     unknown_action: 'ระบบยังไม่รองรับคำสั่งนี้ (อาจยังไม่ได้ deploy)', nothing_selected: 'ยังไม่ได้เลือกข้อ', not_in_job: 'ข้อความนี้ไม่ได้อยู่ในงานนี้แล้ว (มีคนย้ายไปก่อน) โหลดหน้าใหม่',
-    same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน',
+    same_job: 'เลือกงานเดิม ไม่ต้องย้าย', no_title: 'ใส่ชื่องานก่อน', already_merged: 'งานนี้ถูกรวมกับงานอื่นไปแล้ว', not_merged: 'งานนี้ไม่ได้ถูกรวมอยู่',
+    cancelled: 'งานที่ยกเลิกแล้วรวมไม่ได้', split_all: 'ต้องเหลือข้อความไว้อย่างน้อย 1 ข้อความ',
+    use_quote_result: 'ใบเสนอราคา: ปิดด้วยปุ่ม ลูกค้าตกลง / ไม่เอา', no_contact: 'ใส่ชื่อลูกค้าหรือเบอร์', bad_result: 'เลือกผลไม่ถูกต้อง',
     need_fix_note: 'ปิดงานต้องใส่สรุปการแก้ไข (อย่างน้อย 10 ตัวอักษร)', server_error: 'เกิดข้อผิดพลาดที่ระบบ (บันทึกในชีต Errors แล้ว)'
   };
 
@@ -219,16 +226,21 @@
     const b = state.board;
     const q = state.query.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, '');
-    let jobs = b.jobs.filter(j => !j.merged);
+    const all = b.jobs.filter(j => !j.merged);
+    const quotes = all.filter(isQuote);
+    let jobs = all.filter(j => !isQuote(j));
     const counts = {
+      quote: quotes.filter(j => !j.closed).length,
       open: jobs.filter(j => !j.closed).length,
       due: jobs.filter(j => j.due).length,
       quiet: jobs.filter(j => !j.closed && !j.due && j.quietDays >= b.silentDays).length,
       closed: jobs.filter(j => j.closed).length
     };
     if (q) {
-      jobs = jobs.filter(j => (j.no + ' ' + j.title + ' ' + j.customer + ' ' + j.owner).toLowerCase().includes(q) ||
+      jobs = all.filter(j => (j.no + ' ' + j.title + ' ' + j.customer + ' ' + j.owner).toLowerCase().includes(q) ||
         (qDigits.length >= 4 && j.phone.replace(/\D/g, '').includes(qDigits)));
+    } else if (state.filter === 'quote') {
+      jobs = quotes;
     } else if (state.filter.indexOf('status:') === 0) {
       jobs = jobs.filter(j => j.status === state.filter.slice(7));
     } else if (state.filter.indexOf('product:') === 0) {
@@ -239,12 +251,15 @@
     }
     const chip = (key, label) => '<button class="chip' + (state.filter === key && !q ? ' on' : '') + '" data-filter="' + key + '">' +
       label + ' ' + counts[key] + '</button>';
-    const chips = chip('open', 'เปิดอยู่') + chip('due', '⏰ ถึงวันตาม') + chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') +
+    const chips = chip('open', 'เปิดอยู่') + chip('due', '⏰ ถึงวันตาม') + chip('quiet', '😶 เงียบ') + chip('closed', 'ปิดแล้ว') + chip('quote', '📄 เสนอราคา') +
       (state.filter.indexOf(':') > 0 ? '<button class="chip on" data-filter="open">' + esc(state.filter.split(':')[1]) + ' ✕</button>' : '');
     let html = '';
+    if (state.filter === 'quote' && !q) html += '<div class="quote-head"><div class="muted small">ใบเสนอราคาที่ไม่ใช่งานซ่อม (อะไหล่ / สินค้าใหม่ / วัสดุ) — ' +
+      'AI จับจากรูปใบเสนอราคาที่เซลส์ส่งเข้ากลุ่ม (คนยืนยันในคิวตรวจ) · ไม่นับเป็นงานค้าง · ครบ 7 วันน้องจ๊อบเตือนเซลส์ที่ส่งใบให้ตาม · เงียบ 30 วันปิด "หมดอายุ" เอง</div></div>';
 
     if (!jobs.length) html += '<div class="center muted">ไม่มีงาน</div>';
     const groups = q || state.filter === 'closed' ? [['', jobs]]
+      : state.filter === 'quote' ? [...QUOTE_OPEN.map(s => [s, jobs.filter(j => j.status === s)]), ['ปิดแล้ว', jobs.filter(j => j.closed)]].filter(g => g[1].length)
       : b.statuses.map(s => [s, jobs.filter(j => j.status === s)]).filter(g => g[1].length);
     groups.forEach(([title, list]) => {
       html += '<section class="group">' + (title ? '<div class="band ' + ph(title) + '">' + esc(title) +
@@ -531,7 +546,7 @@
   // ภาพรวมงาน: ตัวเลขสำคัญ + งานเปิดแยกช่วง/สถานะ/เจ้าของ/สินค้า · กดแล้วไปรายการที่กรองแล้ว
   function drawDashboard() {
     const b = state.board;
-    const jobs = b.jobs.filter(j => !j.merged);
+    const jobs = b.jobs.filter(j => !j.merged && !isQuote(j));
     const open = jobs.filter(j => !j.closed);
     const today = todayKey();
     const weekAgo = todayKey(-6);
@@ -651,15 +666,24 @@
     sub.push('เปิด ' + esc(fmtDate(j.opened)));
     html += '<div class="sub">' + sub.join(' · ') + '</div>';
     if (j.follow && !j.closed) html += '<div class="sub ' + (j.due ? 'flag-due' : '') + '">⏰ ตามต่อ ' + esc(fmtKey(j.follow)) + '</div>';
-    if (data.mergedFrom.length) html += '<div class="sub small">รวมงาน ' + esc(data.mergedFrom.join(', ')) + ' เข้ามาแล้ว</div>';
+    // งานที่ถูกรวมเข้ามา (ผู้ใช้ 3 พ.ย. 2569): สีประจำงาน + ดูเฉพาะงานนั้น + แยกออก
+    const mergedList = data.merged || (data.mergedFrom || []).map(no => ({ no, title: '' }));
+    state.mergeIdx = {};
+    mergedList.forEach((m, i) => { state.mergeIdx[m.no] = i % 4 + 1; });
+    if (mergedList.length) {
+      html += '<div class="merged-box"><div class="small"><b>🔗 รวมงานเข้ามา ' + mergedList.length + ' งาน</b> — ข้อความของงานเดิมมีป้ายสีกำกับในไทม์ไลน์</div>' +
+        mergedList.map(m => '<div class="merged-row mj' + state.mergeIdx[m.no] + '"><span class="mj-dot"></span><div class="grow"><b>' + esc(m.no) + '</b> ' + esc(m.title || '') +
+          '<div class="muted small">' + esc([m.opened && 'เปิด ' + fmtDate(m.opened), m.at && 'รวมเมื่อ ' + fmtDateTime(m.at), m.by && 'โดย ' + m.by].filter(Boolean).join(' · ')) + '</div></div>' +
+          '<button class="icon-btn" data-unmerge="' + esc(m.no) + '">แยกออก</button></div>').join('') + '</div>';
+    }
     if (off) html += '<p><span class="pill">' + esc(j.status) + '</span></p>';
     html += '</div>';
 
-    html += statusBoxHtml(j, idx, off);
-    html += infoHtml(data) + repairHtml(data);
-    html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button><button class="btn" id="reprint">🖨️ พิมพ์ป้ายซ้ำ</button>' +
-      '<a class="btn" href="#part-new/' + noDigits(j.no) + '">🔧 ถอดอะไหล่ให้งานนี้</a>' +
-      (j.status !== 'ยกเลิก' ? '<button class="btn danger" id="cancel">ยกเลิกงาน</button>' : '') + '</div>';
+    html += data.quote ? quoteBoxHtml(data) : statusBoxHtml(j, idx, off);
+    html += infoHtml(data) + (data.quote ? '' : repairHtml(data));
+    html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button>' +
+      (data.quote ? '' : '<a class="btn" href="#part-new/' + noDigits(j.no) + '">🔧 ถอดอะไหล่ให้งานนี้</a>') +
+      '<button class="btn" id="more">⋯ เพิ่มเติม</button></div>';
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ตลงไทม์ไลน์ เช่น โทรแล้วลูกค้าไม่รับ"></textarea>' +
       '<button class="btn primary" id="save-note">บันทึก</button></div>';
 
@@ -669,6 +693,9 @@
     const seg = (k, l) => '<button class="seg' + (tl === k ? ' on' : '') + '" data-tl="' + k + '">' + l + '</button>';
     html += '<h3>ไทม์ไลน์</h3><div class="segs tl-filter">' + seg('all', 'ทั้งหมด') + seg('chat', '💬 แชท (' + nChat + ')') +
       seg('act', '📋 สถานะ/บันทึก (' + (data.events.length - nChat) + ')') + '</div>' +
+      (mergedList.length ? '<div class="segs tl-jobs">' + ['', j.no, ...mergedList.map(m => m.no)].map(no =>
+        '<button class="seg' + (no ? ' mj' + (state.mergeIdx[no] || 0) : '') + (no === '' ? ' on' : '') + '" data-jf="' + esc(no) + '">' +
+        (no === '' ? 'ทุกงาน' : no === j.no ? esc(no) + ' (งานนี้)' : '📂 ' + esc(no)) + '</button>').join('') + '</div>' : '') +
       '<p class="muted small">💬 = ข้อความจริงในแชท (ชื่อคนส่ง + เวลาที่ส่ง) · แถวเทาเล็ก = ระบบ/คนตรวจทำกับงาน · ข้อความหรือรูปที่ไม่ใช่ของงานนี้ ติ๊กแล้วย้ายไปงานที่ถูก หรือเอาออกได้</p>' +
       '<ul class="timeline' + (tl === 'all' ? '' : ' only-' + tl) + '" id="tl">';
     data.events.forEach(ev => { html += eventHtml(ev); });
@@ -688,14 +715,19 @@
       $app.querySelectorAll('[data-tl]').forEach(x => x.classList.toggle('on', x === b));
       document.getElementById('tl').className = 'timeline' + (b.dataset.tl === 'all' ? '' : ' only-' + b.dataset.tl);
     });
+    $app.querySelectorAll('[data-jf]').forEach(b => b.onclick = () => {
+      const want = b.dataset.jf;
+      $app.querySelectorAll('[data-jf]').forEach(x => x.classList.toggle('on', x === b));
+      document.querySelectorAll('#tl > li').forEach(li => { li.hidden = !!want && li.dataset.job !== want; });
+    });
+    $app.querySelectorAll('[data-unmerge]').forEach(b => b.onclick = () => unmergeSheet(data, b.dataset.unmerge));
     $app.querySelectorAll('[data-status]').forEach(btn => btn.onclick = () => statusSheet(data, btn.dataset.status));
+    $app.querySelectorAll('[data-qres]').forEach(btn => btn.onclick = () => quoteResultSheet(data, btn.dataset.qres));
     document.getElementById('follow').onclick = () => followSheet(data);
-    const cancel = document.getElementById('cancel');
-    if (cancel) cancel.onclick = () => statusSheet(data, 'ยกเลิก');
+    document.getElementById('more').onclick = () => moreSheet(data);
     document.getElementById('rename').onclick = () => renameSheet(data);
     wireInfo(data);
     wireRepair(data);
-    document.getElementById('reprint').onclick = e => reprintLabel(e.target, { no: data.job.no });
     document.getElementById('save-note').onclick = async e => {
       const note = document.getElementById('note').value.trim();
       if (!note) return;
@@ -777,14 +809,26 @@
     try { if (set) localStorage.setItem('tlFilter', set); return localStorage.getItem('tlFilter') || 'all'; } catch { return set || 'all'; }
   }
 
+  // ป้ายงานเดิม (งานที่ถูกรวมเข้ามา) · ไม่มีงานรวม = ไม่มีป้าย
+  function fromTag(ev) {
+    if (!ev.job || ev.job === state.currentJob) return '';
+    const i = (state.mergeIdx || {})[ev.job] || 0;
+    return ' <span class="mj-tag mj' + i + '">📂 จาก ' + esc(ev.job) + '</span>';
+  }
+  function liAttrs(ev, cls) {
+    const from = ev.job && ev.job !== state.currentJob;
+    return ' class="' + cls + (from ? ' from-merged mj' + ((state.mergeIdx || {})[ev.job] || 0) : '') + '" data-job="' + esc(ev.job || '') + '"';
+  }
   function eventHtml(ev) {
     const type = evType(ev);
+    // งานเดิม "รวมเข้ากับ #…" ซ้ำกับแถว "รับรวมจาก" ของงานนี้ → ไม่แสดง
+    if (ev.kind === 'รวมงาน' && ev.job && ev.job !== state.currentJob) return '';
     if (type === 'act') {
       // แนบข้อความ = เวลาที่คนตรวจกด ไม่ใช่เวลาคุย → บอกให้ชัด
       const when = ev.kind === 'แนบข้อความ' ? 'ตรวจเมื่อ ' + fmtDateTime(ev.time) : fmtDateTime(ev.time);
-      return '<li class="ev-act' + (ev.kind === 'เปลี่ยนสถานะ' ? ' k-status' : ev.kind === 'เปิดงาน' ? ' k-open' : '') + '"><div class="act-line">' + (ACT_ICON[ev.kind] || '⚙️') + ' <b>' + esc(ev.kind) + '</b>' +
+      return '<li' + liAttrs(ev, 'ev-act' + (ev.kind === 'เปลี่ยนสถานะ' ? ' k-status' : ev.kind === 'เปิดงาน' ? ' k-open' : ev.kind === 'รวมงาน' ? ' k-merge' : '')) + '><div class="act-line">' + (ACT_ICON[ev.kind] || '⚙️') + ' <b>' + esc(ev.kind) + '</b>' +
         (ev.detail ? ' <span class="act-detail">' + esc(ev.detail) + '</span>' : '') + '</div><div class="act-meta">' + esc(ev.by || 'ระบบ') + ' · ' + esc(when) +
-        (ev.job && ev.job !== (state.currentJob || ev.job) ? ' · ' + esc(ev.job) : '') + '</div></li>';
+        fromTag(ev) + '</div></li>';
     }
     let body = '';
     if (ev.msg) {
@@ -812,8 +856,8 @@
     }
     const when = (ev.msg && ev.msg.time) || ev.time;
     const pick = ev.movable ? '<label class="pick-inline"><input type="checkbox" data-move="' + esc(ev.msgId) + '"></label>' : '';
-    return '<li class="' + kindClass + '">' + pick + '<div class="when">' + esc(fmtDateTime(when)) +
-      (ev.job && ev.job !== (state.currentJob || ev.job) ? ' · ' + esc(ev.job) : '') + '</div>' + body + '</li>';
+    return '<li' + liAttrs(ev, kindClass + (ev.via === 'dm' ? ' ev-dm' : '')) + '>' + pick + '<div class="when">' + esc(fmtDateTime(when)) +
+      fromTag(ev) + '</div>' + body + '</li>';
   }
 
   // แถบล่างของหน้างาน: ย้าย / แยกเป็นงานใหม่ / เอาออก ข้อความที่ติ๊ก
@@ -872,8 +916,8 @@
     }
   }
 
-  function loadThumbs() {
-    const nodes = $app.querySelectorAll('[data-thumb]');
+  function loadThumbs(root) {
+    const nodes = (root || $app).querySelectorAll('[data-thumb]');
     if (!nodes.length) return;
     const show = async node => {
       const id = node.dataset.thumb;
@@ -1235,6 +1279,154 @@
     });
   }
 
+  // ---------- ใบเสนอราคา (ผู้ใช้ 3 พ.ย. 2569) ----------
+  function quoteBoxHtml(data) {
+    const j = data.job, qi = data.quote;
+    let h = '<section class="status-box quote-box ' + ph(j.status) + '"><div class="sb-head"><span class="sb-label">📄 ใบเสนอราคา</span></div>' +
+      '<div class="sb-now">' + esc(j.closed ? 'ปิดแล้ว' : j.status) + '</div>';
+    if (qi.result) h += '<div class="quote-result">ผล: <b>' + esc(qi.result) + '</b> · ' + esc(fmtDateTime(qi.resultAt)) + '</div>';
+    if (qi.repairs && qi.repairs.length) h += '<div class="small">🔧 งานซ่อมต่อ: ' + qi.repairs.map(n => '<a href="#job/' + noDigits(n) + '">' + esc(n) + '</a>').join(', ') + '</div>';
+    if (!j.closed) {
+      h += '<div class="quote-btns"><button class="btn primary" data-qres="ตกลง">✅ ลูกค้าตกลง</button><button class="btn" data-qres="ไม่เอา">❌ ลูกค้าไม่เอา</button></div>' +
+        '<div class="sb-hint">' + (j.status === 'ทำใบเสนอราคา' ? '<button class="link-btn" data-status="รอลูกค้าตัดสิน">ส่งให้ลูกค้าแล้ว › รอลูกค้าตัดสิน</button>'
+          : 'ส่งให้ลูกค้าแล้ว · ' + (j.follow ? 'ตามอีกครั้ง ' + esc(fmtKey(j.follow)) : '') + ' · ไม่ตอบ ' + qi.expireDays + ' วัน = หมดอายุเอง') + '</div>';
+    }
+    return h + '</section>';
+  }
+
+  function quoteResultSheet(data, result) {
+    const ok = result === 'ตกลง';
+    sheet('<h2>' + (ok ? '✅ ลูกค้าตกลง' : '❌ ลูกค้าไม่เอา') + '</h2><p class="muted small">' + esc(data.job.no) + ' ' + esc(data.job.title) + '</p>' +
+      '<label class="field">' + (ok ? 'รายละเอียด (ไม่บังคับ) เช่น ยอด / วันส่งของ' : 'เหตุผล (ไม่บังคับ) เช่น แพงไป / ซื้อที่อื่น') + '<textarea id="q-note" rows="2"></textarea></label>' +
+      (ok ? '<div class="menu-list"><button class="btn primary" id="q-sell">✅ ตกลง ซื้อของไปเอง (จบที่นี่)</button>' +
+        '<button class="btn" id="q-rep">🔧 ตกลง + ต้องให้ช่างซ่อม/ติดตั้ง<div class="muted small">เปิดงานซ่อมใหม่ ลิงก์กลับมาที่ใบเสนอราคานี้ ข้อมูลลูกค้าตามไปด้วย</div></button>'
+        : '<div class="actions"><button class="btn primary" id="q-no">บันทึก ลูกค้าไม่เอา</button>') +
+      '<button class="btn" data-close>ยกเลิก</button></div>', el => {
+      const go = async (btn, repair) => {
+        busy(btn);
+        try {
+          const out = await api('quoteResult', { no: data.job.no, result, repair, note: el.querySelector('#q-note').value.trim() });
+          closeSheet();
+          toast(out.repair ? 'บันทึกแล้ว เปิดงานซ่อม ' + out.repair + ' ✅' : 'บันทึกผลแล้ว ✅');
+          if (out.repair) location.hash = '#job/' + noDigits(out.repair); else renderJob(noDigits(data.job.no)).catch(showError);
+        } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
+      };
+      const b1 = el.querySelector('#q-sell'), b2 = el.querySelector('#q-rep'), b3 = el.querySelector('#q-no');
+      if (b1) b1.onclick = e => go(e.currentTarget, false);
+      if (b2) b2.onclick = e => go(e.currentTarget, true);
+      if (b3) b3.onclick = e => go(e.currentTarget, false);
+    });
+  }
+
+  const itemChips = (name, cur) => '<div class="chips">' + QUOTE_ITEMS.map(x => '<label class="chip"><input type="radio" name="' + name + '" value="' + esc(x) + '"' +
+    (x === cur ? ' checked' : '') + '> ' + esc(x) + '</label>').join('') + '</div>';
+
+  // คิวตรวจ → เปิดเป็นใบเสนอราคา (AI เสนอเอง หรือคนเลือก · ที่คนเลือกเก็บไว้วัด/สอน AI)
+  function quoteFromReview(it) {
+    sheet('<h2>📄 เปิดเป็นใบเสนอราคา</h2><p class="muted small">ลูกค้าขอราคาอะไหล่/สินค้า/วัสดุ (ไม่ใช่งานซ่อม) · ข้อความในก้อนนี้จะอยู่ในใบเสนอราคา</p>' +
+      '<div class="text small">' + esc(it.text) + '</div>' +
+      '<label class="field">เสนอราคาอะไร<input id="q-title" maxlength="100" value="' + esc(it.title || '') + '"></label>' +
+      '<div class="field">ประเภท' + itemChips('q-item', 'อะไหล่') + '</div>' +
+      '<label class="field">สถานะ<select id="q-status"><option value="รอลูกค้าตัดสิน">ส่งให้ลูกค้าแล้ว รอลูกค้าตัดสิน</option><option value="ทำใบเสนอราคา">ยังทำใบเสนอราคาอยู่</option></select></label>' +
+      '<div class="actions"><button class="btn primary" id="q-ok">เปิดใบเสนอราคา</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#q-ok').onclick = e => {
+        const title = el.querySelector('#q-title').value.trim();
+        if (!title) return toast('ใส่ว่าเสนอราคาอะไรก่อน');
+        busy(e.target);
+        closeSheet();
+        decide(it, { decision: 'quote', title, qstatus: el.querySelector('#q-status').value,
+          item: (el.querySelector('input[name=q-item]:checked') || {}).value || 'อื่นๆ' }, 'เปิดใบเสนอราคาแล้ว');
+      };
+    });
+  }
+
+  // เมนู ⋯ ในหน้างาน: ของที่ใช้ไม่บ่อย (ไม่ให้ปุ่มรก)
+  function moreSheet(data) {
+    const j = data.job;
+    sheet('<h2>' + esc(j.no) + ' เพิ่มเติม</h2><div class="menu-list">' +
+      '<button class="btn" id="m-merge">🔗 รวมกับงานอื่น<div class="muted small">เปิดงานซ้ำ / เจองานเดิมทีหลัง — ข้อความทั้งสองงานรวมในไทม์ไลน์เดียว</div></button>' +
+      '<button class="btn" id="m-reprint">🖨️ พิมพ์ป้ายซ้ำ<div class="muted small">ป้าย QR หลุด/หาย</div></button>' +
+      (j.status !== 'ยกเลิก' ? '<button class="btn danger" id="m-cancel">ยกเลิกงาน</button>' : '') +
+      '<button class="btn" data-close>ปิด</button></div>', el => {
+      el.querySelector('#m-merge').onclick = () => mergeSheet(data);
+      el.querySelector('#m-reprint').onclick = e => { closeSheet(); reprintLabel(document.getElementById('more') || e.target, { no: j.no }); };
+      const c = el.querySelector('#m-cancel');
+      if (c) c.onclick = () => statusSheet(data, 'ยกเลิก');
+    });
+  }
+
+  // รวมงาน (ผู้ใช้ 3 พ.ย. 2569): เลือกงานคู่ (งานที่น่าซ้ำขึ้นก่อน หรือค้นเอง) → เลือกว่างานไหนเป็นงานหลัก → รวม
+  function mergeSheet(data) {
+    const j = data.job;
+    const jobBtn = x => '<button type="button" class="res-job" data-no="' + esc(x.no) + '" data-title="' + esc(x.title) + '"><b>' + esc(x.no) + '</b> ' + esc(x.title) +
+      ' <span class="pill ' + ph(x.status) + '">' + esc(shortStatus(x.status)) + '</span><div class="muted small">' +
+      esc([x.why && '⚠️ ' + x.why, x.customer, x.phone, x.opened && 'เปิด ' + fmtDate(x.opened)].filter(Boolean).join(' · ')) + '</div></button>';
+    sheet('<h2>🔗 รวม ' + esc(j.no) + ' กับงานอื่น</h2>' +
+      '<p class="muted small">ใช้เมื่อเปิดงานซ้ำ หรือเจอว่ามีงานเดิมอยู่แล้ว · หลังรวม ข้อความ/รูปของทั้งสองงานอยู่ในไทม์ไลน์เดียว (มีป้ายบอกว่ามาจากงานไหน) · รวมผิดกด "แยกออก" ได้</p>' +
+      '<div id="mg-sug" class="muted small">กำลังหางานที่น่าจะซ้ำ…</div>' +
+      '<div class="row"><input id="mg-q" placeholder="ค้นเลขงาน / ชื่อลูกค้า / เบอร์" class="grow"><button class="btn" id="mg-go">ค้นหา</button></div><div id="mg-res"></div>' +
+      '<div id="mg-pick"></div><div class="actions"><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      const pick = other => {
+        el.querySelectorAll('.res-job').forEach(b => b.classList.toggle('on', b.dataset.no === other.no));
+        const older = String(other.no) < String(j.no) ? other.no : j.no; // เลขน้อย = เปิดก่อน → แนะนำเป็นงานหลัก
+        const opt = (main, sub, title) => '<label class="mg-opt"><input type="radio" name="mg-main" value="' + esc(main) + '"' + (main === older ? ' checked' : '') + '> ' +
+          'เก็บ <b>' + esc(main) + '</b> เป็นงานหลัก<div class="muted small">' + esc(sub) + ' ' + esc(title) + ' จะถูกรวมเข้าไป (เลขเดิมยังค้นเจอ พาไปงานหลัก)' + (main === older ? ' · แนะนำ: เปิดก่อน' : '') + '</div></label>';
+        el.querySelector('#mg-pick').innerHTML = '<h3>งานไหนเป็นงานหลัก?</h3>' + opt(j.no, other.no, other.title) + opt(other.no, j.no, j.title) +
+          '<p class="muted small">สถานะ/ข้อมูลลูกค้าใช้ของงานหลัก · ทุกข้อความ รูป โน้ต ของอีกงานยังอยู่ครบ</p>' +
+          '<button class="btn primary" id="mg-ok">🔗 รวม ' + esc(j.no) + ' กับ ' + esc(other.no) + '</button>';
+        el.querySelector('#mg-ok').onclick = async e => {
+          const main = el.querySelector('input[name=mg-main]:checked').value;
+          const from = main === j.no ? other.no : j.no;
+          busy(e.target);
+          try {
+            const page = await api('merge', { from, into: main });
+            closeSheet();
+            if (location.hash !== '#job/' + noDigits(page.job.no)) history.replaceState(null, '', '#job/' + noDigits(page.job.no));
+            drawJob(page);
+            toast('รวม ' + from + ' เข้า ' + main + ' แล้ว ✅');
+          } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
+        };
+      };
+      const wire = box => box.querySelectorAll('.res-job').forEach(b => b.onclick = () => pick({ no: b.dataset.no, title: b.dataset.title }));
+      core('mergeCandidates', { no: j.no }).then(out => {
+        const sug = el.querySelector('#mg-sug');
+        sug.className = '';
+        sug.innerHTML = out.candidates.length ? '<div class="small"><b>งานที่น่าจะเป็นงานเดียวกัน</b></div>' + out.candidates.map(jobBtn).join('') : '<div class="muted small">ไม่เจองานที่เบอร์/SN/ชื่อลูกค้าตรงกัน — ค้นเองด้านล่าง</div>';
+        wire(sug);
+      }).catch(() => { el.querySelector('#mg-sug').innerHTML = ''; });
+      const q = el.querySelector('#mg-q'), res = el.querySelector('#mg-res');
+      const go = async () => {
+        const v = q.value.trim();
+        if (v.length < 2 && !/^\d+$/.test(v)) return toast('พิมพ์อย่างน้อย 2 ตัวอักษร');
+        res.innerHTML = '<div class="muted small">กำลังค้น…</div>';
+        try {
+          const out = await core('search', { q: v });
+          const jobs = out.jobs.filter(x => !x.merged && x.no !== j.no && x.status !== 'ยกเลิก').slice(0, 8);
+          res.innerHTML = jobs.length ? jobs.map(jobBtn).join('') : '<div class="muted small">ไม่พบงานที่ตรงกับ "' + esc(v) + '"</div>';
+          wire(res);
+        } catch (err) { if (err.message !== 'login') res.innerHTML = '<div class="small">⚠️ ' + esc(err.message) + '</div>'; }
+      };
+      el.querySelector('#mg-go').onclick = go;
+      q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+    });
+  }
+
+  function unmergeSheet(data, no) {
+    sheet('<h2>แยก ' + esc(no) + ' ออกจาก ' + esc(data.job.no) + '?</h2><p class="small">ใช้เมื่อรวมผิด · ' + esc(no) +
+      ' กลับเป็นงานแยกด้วยสถานะก่อนรวม ข้อความเดิมของงานนั้นกลับไปอยู่งานนั้น</p><div class="actions"><button class="btn danger" id="um-ok">แยกออก</button>' +
+      '<button class="btn" data-close>ยกเลิก</button></div>', el => {
+      el.querySelector('#um-ok').onclick = async e => {
+        busy(e.target);
+        try {
+          const page = await api('unmerge', { no });
+          closeSheet();
+          drawJob(page);
+          toast(page.unmerged.no + ' แยกออกแล้ว (สถานะ ' + page.unmerged.status + ') ✅');
+        } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
+      };
+    });
+  }
+
   function renameSheet(data) {
     sheet('<h2>แก้ชื่องาน</h2><label class="field">ชื่องาน (ลูกค้า + เครื่อง/อาการ)<input id="f-title" maxlength="120" value="' +
       esc(data.job.title) + '"></label><div class="actions"><button class="btn primary" id="f-ok">บันทึก</button>' +
@@ -1352,6 +1544,49 @@
       (!done && it.inJobs && it.inJobs.length ? '<div>' + partialNote(it.inJobs) + '</div>' : '') + '</div>';
   }
 
+  // แยกข้อความออกจากก้อน (ผู้ใช้ 3 พ.ย. 2569): ก้อนรวมข้อความติดกันของคนเดียว บางทีปนงานอื่น
+  // กางดูทีละข้อความ → ติ๊กข้อความที่ "ไม่ใช่เรื่องเดียวกัน" → กลายเป็นข้ออีกข้อในคิว แล้วตัดสินแยกกัน
+  async function splitSheet(it) {
+    sheet('<h2>✂️ แยกข้อความในก้อนนี้</h2><div class="center muted">กำลังโหลด…</div>');
+    let data;
+    try { data = await core('chunkMsgs', { row: it.row }); } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); closeSheet(); return; }
+    // AI บอกว่าข้อความไหนเป็นของงานอื่น → ติ๊กไว้ให้ก่อน (ข้อความส่วนใหญ่ = เรื่องหลักของก้อน)
+    const tally = {};
+    data.msgs.forEach(m => { if (m.ai) tally[m.ai] = (tally[m.ai] || 0) + 1; });
+    const main = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0] || '';
+    const pre = m => !!(main && m.ai && m.ai !== main);
+    const row = (m, idx) => {
+      let media = '';
+      if (m.type === 'image') media = m.thumb ? '<div class="thumb-ph" data-thumb="' + esc(m.id) + '">กำลังโหลดรูป…</div>' : m.full ? '<img class="thumb" loading="lazy" alt="รูป" src="' + esc(m.full) + '">' : '<div class="muted small">[รูป]</div>';
+      else if (m.type === 'video') media = '<div class="muted small">▶️ คลิป</div>';
+      else if (m.type !== 'text') media = '<div class="muted small">[' + esc(m.type) + ']</div>';
+      return '<label class="sp-row' + (pre(m) ? ' on' : '') + '"><input type="checkbox" data-sp="' + esc(m.id) + '"' + (pre(m) ? ' checked' : '') + '>' +
+        '<div class="grow"><div class="muted small">' + (idx + 1) + '. ' + esc(fmtDateTime(m.time)) + ' · ' + esc(m.sender) +
+        (m.ai ? ' · <span class="tag tag-ai">AI: ' + esc(m.ai) + '</span>' : '') + (m.inJob ? ' · 📂 อยู่ใน ' + esc(m.inJob) + ' แล้ว' : '') + '</div>' +
+        (m.text ? '<div class="text">' + esc(m.text) + '</div>' : '') + media + '</div></label>';
+    };
+    sheet('<h2>✂️ แยกข้อความในก้อนนี้</h2><p class="muted small">ติ๊กข้อความที่ <b>ไม่ใช่เรื่องเดียวกัน</b> กับก้อนนี้ → จะแยกเป็นอีกข้อในคิวตรวจ แล้วค่อยตัดสินแยกกัน (เปิดงานใหม่ / แนบงานอื่น / ไม่เกี่ยว)' +
+      (main ? ' · ติ๊กไว้ให้แล้วตามที่ AI คิดว่าเป็นของงานอื่น ตรวจอีกที' : '') + '</p>' +
+      '<div class="sp-list">' + data.msgs.map(row).join('') + '</div>' +
+      '<div class="actions sticky-actions"><button class="btn primary" id="sp-ok">✂️ แยกที่ติ๊กออก</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
+      loadThumbs(el);
+      const boxes = [...el.querySelectorAll('[data-sp]')];
+      boxes.forEach(b => b.onchange = () => b.closest('.sp-row').classList.toggle('on', b.checked));
+      el.querySelector('#sp-ok').onclick = async e => {
+        const out = boxes.filter(b => b.checked).map(b => b.dataset.sp);
+        if (!out.length) return toast('ติ๊กข้อความที่จะแยกออกก่อน');
+        if (out.length === boxes.length) return toast('ติ๊กครบทุกข้อความ = ไม่ต้องแยก (เหลือไว้อย่างน้อย 1 ข้อความ)');
+        busy(e.target);
+        try {
+          await api('splitChunk', { row: it.row, msgId: it.msgId, out });
+          closeSheet();
+          toast('แยก ' + out.length + ' ข้อความเป็นอีกข้อแล้ว ✅ ตัดสินทีละข้อได้เลย');
+          renderReview().catch(showError);
+        } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
+      };
+    });
+  }
+
   function bindPicks() {
     $app.querySelectorAll('[data-pick]').forEach(box => box.onchange = () => {
       const row = Number(box.dataset.pick);
@@ -1412,6 +1647,8 @@
       else if (btn.dataset.act === 'dupe') { busy(btn); decide(it, { decision: 'attach', job: btn.dataset.job, status: '' }, 'แนบเข้า ' + btn.dataset.job + ' แล้ว'); }
       else if (btn.dataset.act === 'new') newSheet([it], data.statuses);
       else if (btn.dataset.act === 'part') partFromReview([it]);
+      else if (btn.dataset.act === 'split') splitSheet(it);
+      else if (btn.dataset.act === 'quote') quoteFromReview(it);
       else attachSheet([it], data.statuses);
     });
     bindPicks();
@@ -1437,10 +1674,13 @@
     return '<div class="rv' + (on ? ' picked' : '') + '"><label class="pick"><input type="checkbox" data-pick="' + it.row + '"' +
       (on ? ' checked' : '') + '><span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
       '<div class="text">' + esc(it.text) + '</div><div class="ai">' + ai + '</div>' + (dup ? dupeBox(it.dupes, i) : '') + '<div class="actions">' +
+      (it.quote ? '<button class="btn' + (!dup ? ' primary' : '') + '" data-act="quote" data-i="' + i + '">📄 เปิดใบเสนอราคา</button>' : '') +
       '<button class="btn' + (it.action === 'งานใหม่' && !dup ? ' primary' : '') + '" data-act="new" data-i="' + i + '">＋ งานใหม่</button>' +
       '<button class="btn' + (it.action === 'อัปเดตงานเดิม' ? ' primary' : '') + '" data-act="attach" data-i="' + i + '">📎 แนบงานเดิม</button>' +
       '<button class="btn" data-act="notjob" data-i="' + i + '">ไม่เกี่ยว</button>' +
-      '<button class="btn" data-act="part" data-i="' + i + '">🔧 ถอดอะไหล่</button></div></div>';
+      '<button class="btn" data-act="part" data-i="' + i + '">🔧 ถอดอะไหล่</button>' +
+      (it.quote ? '' : '<button class="btn" data-act="quote" data-i="' + i + '">📄 ใบเสนอราคา</button>') +
+      (it.n > 1 ? '<button class="btn" data-act="split" data-i="' + i + '">✂️ แยกข้อความ (' + it.n + ')</button>' : '') + '</div></div>';
   }
 
   // งานที่อาจซ้ำ (ลูกค้า/เบอร์/SN เดียวกัน เปิดไว้แล้วจากแชทน้องจ๊อบ ฟอร์ม หรือคิวตรวจ) · ปุ่มแนบเข้างานนั้นได้เลย

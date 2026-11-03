@@ -437,6 +437,25 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .timeline.only-act li.ev-chat { display: none; }
 .timeline li.ev-chat.picked { background: var(--ph-start-bg); }
 
+/* งานที่ถูกรวมเข้ามา (ผู้ใช้ 3 พ.ย. 2569): สีประจำงานเดิม · ป้าย "📂 จาก #…" · ตัวกรองตามงาน */
+.mj0 { --mj: #6b7280; } .mj1 { --mj: #7c3aed; } .mj2 { --mj: #0891b2; } .mj3 { --mj: #db2777; } .mj4 { --mj: #ca8a04; }
+.mj-tag { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  color: var(--mj); background: color-mix(in srgb, var(--mj) 14%, transparent); white-space: nowrap; }
+.timeline li.ev-chat.from-merged { border-left-color: var(--mj); }
+.timeline li.ev-chat.from-merged::before, .timeline li.ev-act.from-merged::before { background: var(--mj); }
+.timeline li.ev-note.from-merged { box-shadow: inset 3px 0 0 var(--mj); }
+.timeline li.ev-dm { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+.timeline li.ev-act.k-merge { color: var(--text); font-size: 13px; padding: 6px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+.merged-box { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.merged-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; }
+.merged-row .grow { flex: 1; min-width: 0; }
+.mj-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--mj); flex: none; }
+.tl-jobs { margin: 0 0 6px; flex-wrap: wrap; }
+.tl-jobs .seg.mj1, .tl-jobs .seg.mj2, .tl-jobs .seg.mj3, .tl-jobs .seg.mj4 { color: var(--mj); }
+.menu-list { display: flex; flex-direction: column; gap: 8px; }
+.menu-list .btn { text-align: left; width: 100%; }
+.mg-opt { display: block; padding: 8px 10px; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; }
+
 /* ฟอร์มแจ้งงานซ่อมเป็นข้อ 1–5 + เส้นไทม์ไลน์ (ผู้ใช้ 30 ต.ค. 2569) · กำลังกรอก = ส้ม · ครบ = เขียว */
 .intake.steps { --step-on: #EA580C; }
 .nsteps-top { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 10px; font-size: 16px; }
@@ -498,3 +517,18 @@ ul.plain li:first-child { border-top: 0; }
 .lockout .lock-icon { font-size: 56px; margin-bottom: 8px; }
 .lockout h2 { margin: 8px 0; font-size: 20px; }
 .lockout .btn { margin-top: 16px; }
+
+/* แยกข้อความในก้อน (คิวตรวจ · ผู้ใช้ 3 พ.ย. 2569) */
+.sp-list { max-height: 60vh; overflow-y: auto; }
+.sp-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.sp-row input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
+.sp-row .grow { flex: 1; min-width: 0; }
+.sp-row.on { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--card)); }
+.sp-row .thumb { max-width: 160px; }
+
+/* ใบเสนอราคา (ผู้ใช้ 3 พ.ย. 2569) */
+.quote-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin: 4px 0 10px; padding: 10px 12px;
+  border: 1px dashed var(--line); border-radius: 12px; background: var(--card); }
+.quote-head .btn { flex: none; }
+.quote-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 4px; }
+.quote-result { margin: 6px 0; }
