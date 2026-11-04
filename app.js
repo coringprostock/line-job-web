@@ -683,7 +683,7 @@
     html += infoHtml(data) + (data.quote ? '' : repairHtml(data));
     html += '<div class="actions"><button class="btn" id="follow">⏰ ตั้งวันตาม</button>' +
       (data.quote ? '' : '<a class="btn" href="#part-new/' + noDigits(j.no) + '">🔧 ถอดอะไหล่ให้งานนี้</a>') +
-      '<button class="btn" id="more">⋯ เพิ่มเติม</button></div>';
+      '<button class="btn" id="share">📤 แชร์</button><button class="btn" id="more">⋯ เพิ่มเติม</button></div>';
     html += '<div class="note-box"><textarea id="note" placeholder="บันทึกโน้ตลงไทม์ไลน์ เช่น โทรแล้วลูกค้าไม่รับ"></textarea>' +
       '<button class="btn primary" id="save-note">บันทึก</button></div>';
 
@@ -725,6 +725,7 @@
     $app.querySelectorAll('[data-qres]').forEach(btn => btn.onclick = () => quoteResultSheet(data, btn.dataset.qres));
     document.getElementById('follow').onclick = () => followSheet(data);
     document.getElementById('more').onclick = () => moreSheet(data);
+    document.getElementById('share').onclick = () => shareJob(data);
     document.getElementById('rename').onclick = () => renameSheet(data);
     wireInfo(data);
     wireRepair(data);
@@ -1341,6 +1342,50 @@
   }
 
   // เมนู ⋯ ในหน้างาน: ของที่ใช้ไม่บ่อย (ไม่ให้ปุ่มรก)
+  // แชร์งานเข้าห้องแชทไลน์เป็นการ์ด (ผู้ใช้ 4 พ.ย. 2569) — ใช้ตัวเลือกห้องของ LINE (shareTargetPicker)
+  // การ์ดไปถึงใครก็ได้ จึงไม่ใส่ชื่อลูกค้า/เบอร์/ที่อยู่ · กดเปิดงาน = LIFF ตรวจรายชื่อ staff เหมือนทุกหน้า (คนนอกเห็นหน้า 🔒)
+  function shareCard(data) {
+    const j = data.job, i = data.info || {}, no = '#' + noDigits(j.no);
+    const url = 'https://liff.line.me/' + CFG.LIFF_ID + '?job=' + noDigits(j.no);
+    const cut = (t, n) => { t = String(t || '').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+    const row = (label, v) => v ? [{ type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: label, size: 'sm', color: '#888888', flex: 2 },
+      { type: 'text', text: cut(v, 120), size: 'sm', color: '#222222', flex: 5, wrap: true, maxLines: 3 }] }] : [];
+    const quote = !!data.quote;
+    const by = state.me && state.me.name ? state.me.name : '';
+    return {
+      type: 'flex', altText: (quote ? '📄 ใบเสนอราคา ' : '🔧 งาน ') + no + ' ' + cut(j.title, 60),
+      contents: { type: 'bubble', size: 'kilo',
+        header: { type: 'box', layout: 'vertical', backgroundColor: quote ? '#7C3AED' : '#06C755', paddingAll: '14px', contents: [
+          { type: 'text', text: quote ? '📄 ใบเสนอราคา' : '🔧 งานซ่อม', size: 'xs', color: '#FFFFFF' },
+          { type: 'text', text: no, size: 'xl', weight: 'bold', color: '#FFFFFF' }] },
+        body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+          { type: 'text', text: cut(j.title, 80) || no, weight: 'bold', size: 'md', wrap: true, maxLines: 3 },
+          ...row('สถานะ', j.status), ...row('สินค้า', i.product), ...row('อาการ', i.symptom),
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: '🔒 เปิดดูได้เฉพาะทีมงาน' + (by ? ' · แชร์โดย ' + by : ''), size: 'xxs', color: '#999999', wrap: true, margin: 'md' }] },
+        footer: { type: 'box', layout: 'vertical', contents: [
+          { type: 'button', style: 'primary', color: quote ? '#7C3AED' : '#06C755', height: 'sm', action: { type: 'uri', label: 'เปิดดูงาน', uri: url } }] }
+      }
+    };
+  }
+  async function shareJob(data) {
+    const url = 'https://liff.line.me/' + CFG.LIFF_ID + '?job=' + noDigits(data.job.no);
+    const can = window.liff && liff.isApiAvailable && liff.isApiAvailable('shareTargetPicker');
+    if (!can) {
+      // นอกแอปไลน์ / ยังไม่เปิด Share target picker ใน LINE Developers → คัดลอกลิงก์แทน
+      try { await navigator.clipboard.writeText(url); toast('คัดลอกลิงก์งานแล้ว วางในแชทได้เลย (แชร์เป็นการ์ดได้เฉพาะในแอปไลน์)'); }
+      catch (e) { sheet('<h2>ลิงก์งาน</h2><p class="small">กดค้างเพื่อคัดลอก</p><p><input readonly value="' + esc(url) + '" style="width:100%"></p><div class="actions"><button class="btn" data-close>ปิด</button></div>'); }
+      return;
+    }
+    try {
+      const res = await liff.shareTargetPicker([shareCard(data)], { isMultiple: true });
+      if (res && res.status === 'success') toast('แชร์งาน #' + noDigits(data.job.no) + ' แล้ว ✅');
+    } catch (err) {
+      toast('⚠️ แชร์ไม่สำเร็จ: ' + (err && err.message || err));
+    }
+  }
+
   function moreSheet(data) {
     const j = data.job;
     sheet('<h2>' + esc(j.no) + ' เพิ่มเติม</h2><div class="menu-list">' +
