@@ -532,3 +532,13 @@ ul.plain li:first-child { border-top: 0; }
 .quote-head .btn { flex: none; }
 .quote-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 4px; }
 .quote-result { margin: 6px 0; }
+.cluster { background: var(--card); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.cl-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.cl-warn { background: var(--bg); border-radius: 8px; padding: 6px 8px; font-size: 13px; margin-bottom: 8px; }
+.cl-row { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.cl-row.off { opacity: .5; }
+.cl-pick { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.cl-pick input { width: 20px; height: 20px; accent-color: var(--accent); flex: 0 0 auto; }
+.cl-text { grid-column: 1 / -1; white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
+.cluster .rv { margin: 6px 0; }
+.cluster .actions { margin: 10px 0 0; }

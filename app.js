@@ -1497,6 +1497,8 @@
     const live = claim();
     state.reviewMode = state.reviewMode || 'queue';
     state.selected = new Set();
+    state.clusterOff = new Set();    // ก้อนที่ติ๊กออกจากกลุ่ม
+    state.clusterOpen = new Set();   // ก้อนที่กางดูรายละเอียด
     $app.innerHTML = reviewHeader() + '<div class="center muted">กำลังโหลด…</div>';
     bindReviewHeader();
     if (state.reviewMode === 'chat') {
@@ -1556,7 +1558,7 @@
     const data = state.chat;
     let html = reviewHeader();
     if (!data.items.length) {
-      html += '<div class="center muted">ยังไม่มีข้อความของวันนี้ที่ประมวลผลแล้ว<br><span class="small">(ข้อความล่าสุดใช้เวลาราว 10–15 นาที · ก่อน 8 ต.ค. ไม่มีข้อมูล)</span></div>';
+      html += '<div class="center muted">ยังไม่มีข้อความของวันนี้ที่ประมวลผลแล้ว<br><span class="small">(AI อ่านแชทรอบ 22:00 ทุกวัน · ก่อน 8 ต.ค. ไม่มีข้อมูล)</span></div>';
     } else {
       html += '<p class="muted small">ทุกก้อนข้อความในกลุ่มหลัก ' + data.items.length + ' ก้อน เรียงตามเวลา · ติ๊กก้อนที่เป็นงานแล้วกดแถบด้านล่าง</p>';
       data.items.forEach(it => { html += chatHtml(it); });
@@ -1681,7 +1683,7 @@
       const allOn = list.every(([it]) => state.selected.has(it.row));
       html += '<section class="group"><h3 class="group-head"><label><input type="checkbox" data-all="' + key + '"' +
         (allOn ? ' checked' : '') + '> ' + esc(title) + ' (' + list.length + ')</label></h3>';
-      list.forEach(([it, i]) => { html += reviewHtml(it, i); });
+      reviewClusters(list).forEach(c => { html += c.length > 1 ? clusterHtml(c) : reviewHtml(c[0][0], c[0][1]); });
       html += '</section>';
     });
     $app.innerHTML = html + '<div class="bulk-spacer"></div>';
@@ -1697,12 +1699,66 @@
       else attachSheet([it], data.statuses);
     });
     bindPicks();
+    bindClusters(data);
     $app.querySelectorAll('[data-all]').forEach(box => box.onchange = () => {
       const test = REVIEW_GROUPS.find(g => g[0] === box.dataset.all)[2];
       data.items.filter(test).forEach(it => { if (box.checked) state.selected.add(it.row); else state.selected.delete(it.row); });
       drawReview();
     });
     drawBulkBar();
+  }
+
+  // กลุ่มงานจากรอบอ่านทั้งวัน: ก้อนงานใหม่เรื่องเดียวกัน (groupKey) · ก้อนที่ AI เสนอแนบงานเดียวกัน
+  const clusterKey = it => it.groupKey || (it.action === 'อัปเดตงานเดิม' && it.job ? 'j' + it.job : '');
+  function reviewClusters(list) {
+    const seen = new Map(), out = [];
+    list.forEach(pair => {
+      const k = clusterKey(pair[0]);
+      if (k && seen.has(k)) { seen.get(k).push(pair); return; }
+      const c = [pair];
+      if (k) seen.set(k, c);
+      out.push(c);
+    });
+    return out;
+  }
+
+  function clusterHtml(list) {
+    const first = list[0][0], key = clusterKey(first), isNew = first.action === 'งานใหม่';
+    const items = list.map(x => x[0]), on = items.filter(it => !state.clusterOff.has(it.row));
+    const conf = Math.min(...items.map(it => it.conf));
+    const dup = isNew && items.some(it => it.dupes && it.dupes.length);
+    let html = '<div class="cluster"><div class="cl-head"><b>' + (isNew ? '🆕 งานใหม่ · ' + esc(first.title || 'ไม่มีชื่องาน') : '📂 อัปเดต ' + esc(first.jobLabel || first.job)) + '</b>' +
+      '<span class="muted small">' + items.length + ' ก้อน · มั่นใจอย่างน้อย ' + conf + '%</span></div>' +
+      (dup ? '<div class="cl-warn">⚠️ มีก้อนในกลุ่มนี้ที่อาจเปิดงานไปแล้ว กดเปิดงานเพื่อดูรายละเอียด</div>' : '');
+    list.forEach(([it, i]) => {
+      const off = state.clusterOff.has(it.row), open = state.clusterOpen.has(it.row);
+      html += '<div class="cl-row' + (off ? ' off' : '') + '"><label class="cl-pick"><input type="checkbox" data-cm="' + it.row + '"' + (off ? '' : ' checked') + '>' +
+        '<span class="muted small">' + esc(fmtDateTime(it.time)) + ' · ' + esc(it.sender) + '</span></label>' +
+        '<button class="icon-btn" data-co="' + it.row + '" aria-label="รายละเอียด">' + (open ? '▴' : '⋯') + '</button>' +
+        (open ? '' : '<div class="cl-text">' + esc(it.text) + '</div>') + '</div>' + (open ? reviewHtml(it, i) : '');
+    });
+    const n = on.length;
+    html += '<div class="actions">' + (isNew
+      ? '<button class="btn primary" data-cl="new" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>✓ เปิด 1 งาน รวม ' + n + ' ก้อน</button>'
+      : '<button class="btn primary" data-cl="attach" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>✓ แนบทั้งกลุ่ม (' + n + ')</button>') +
+      '<button class="btn" data-cl="other" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>📎 แนบงานอื่น</button>' +
+      '<button class="btn" data-cl="notjob" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>ไม่เกี่ยว</button></div></div>';
+    return html;
+  }
+
+  function bindClusters(data) {
+    const active = key => data.items.filter(it => clusterKey(it) === key && !state.clusterOff.has(it.row));
+    const toggle = (set, row) => { if (set.has(row)) set.delete(row); else set.add(row); drawReview(); };
+    $app.querySelectorAll('[data-cm]').forEach(b => b.onchange = () => toggle(state.clusterOff, Number(b.dataset.cm)));
+    $app.querySelectorAll('[data-co]').forEach(b => b.onclick = () => toggle(state.clusterOpen, Number(b.dataset.co)));
+    $app.querySelectorAll('[data-cl]').forEach(b => b.onclick = () => {
+      const list = active(b.dataset.key);
+      if (!list.length) return;
+      if (b.dataset.cl === 'notjob') { busy(b); decideMany({ decision: 'notjob' }, list); return; }
+      if (b.dataset.cl === 'attach') { busy(b); decideMany({ decision: 'attach', job: list[0].job, status: '' }, list); return; }
+      state.selected = new Set(list.map(it => it.row));   // หน้าต่างเปิดงาน/แนบงาน บันทึกข้อที่เลือกอยู่
+      if (b.dataset.cl === 'new') newSheet(list, data.statuses); else attachSheet(list, data.statuses);
+    });
   }
 
   function reviewHtml(it, i) {
