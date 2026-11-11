@@ -1337,10 +1337,11 @@
       el.querySelector('#q-ok').onclick = e => {
         const title = el.querySelector('#q-title').value.trim();
         if (!title) return toast('ใส่ว่าเสนอราคาอะไรก่อน');
-        busy(e.target);
-        closeSheet();
+        // อ่านค่าก่อนปิดหน้าต่าง (closeSheet ล้างช่องทิ้ง · เดิมอ่านหลังปิด = พังเงียบ กดแล้วไม่เกิดอะไร ผู้ใช้ 11 พ.ย. 2569)
         const choice = { decision: 'quote', title, qstatus: el.querySelector('#q-status').value,
           item: (el.querySelector('input[name=q-item]:checked') || {}).value || 'อื่นๆ' };
+        busy(e.target);
+        closeSheet();
         if (list.length > 1) decideMany(choice, list); else decide(it, choice, 'เปิดใบเสนอราคาแล้ว');
       };
     });
