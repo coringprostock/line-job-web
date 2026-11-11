@@ -1323,10 +1323,14 @@
     (x === cur ? ' checked' : '') + '> ' + esc(x) + '</label>').join('') + '</div>';
 
   // คิวตรวจ → เปิดเป็นใบเสนอราคา (AI เสนอเอง หรือคนเลือก · ที่คนเลือกเก็บไว้วัด/สอน AI)
-  function quoteFromReview(it) {
-    sheet('<h2>📄 เปิดเป็นใบเสนอราคา</h2><p class="muted small">ลูกค้าขอราคาอะไหล่/สินค้า/วัสดุ (ไม่ใช่งานซ่อม) · ข้อความในก้อนนี้จะอยู่ในใบเสนอราคา</p>' +
-      '<div class="text small">' + esc(it.text) + '</div>' +
-      '<label class="field">เสนอราคาอะไร<input id="q-title" maxlength="100" value="' + esc(it.title || '') + '"></label>' +
+  // หลายก้อน (กลุ่มจาก AI / ติ๊กหลายข้อ) = ใบเสนอราคาใบเดียว (ผู้ใช้ 11 พ.ย. 2569)
+  function quoteFromReview(items) {
+    const list = Array.isArray(items) ? items : [items], it = list[0];
+    const title = (list.find(x => x.title) || {}).title || '';
+    sheet('<h2>📄 เปิดเป็นใบเสนอราคา' + (list.length > 1 ? ' (รวม ' + list.length + ' ก้อน)' : '') + '</h2><p class="muted small">ลูกค้าขอราคาอะไหล่/สินค้า/วัสดุ (ไม่ใช่งานซ่อม) · ข้อความ' +
+      (list.length > 1 ? 'ทุกก้อนที่เลือกจะอยู่ในใบเสนอราคาใบเดียว' : 'ในก้อนนี้จะอยู่ในใบเสนอราคา') + '</p>' +
+      '<div class="text small">' + list.map(x => esc(x.text)).filter(Boolean).join('<br>') + '</div>' +
+      '<label class="field">เสนอราคาอะไร<input id="q-title" maxlength="100" value="' + esc(title) + '"></label>' +
       '<div class="field">ประเภท' + itemChips('q-item', 'อะไหล่') + '</div>' +
       '<label class="field">สถานะ<select id="q-status"><option value="รอลูกค้าตัดสิน">ส่งให้ลูกค้าแล้ว รอลูกค้าตัดสิน</option><option value="ทำใบเสนอราคา">ยังทำใบเสนอราคาอยู่</option></select></label>' +
       '<div class="actions"><button class="btn primary" id="q-ok">เปิดใบเสนอราคา</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
@@ -1335,8 +1339,9 @@
         if (!title) return toast('ใส่ว่าเสนอราคาอะไรก่อน');
         busy(e.target);
         closeSheet();
-        decide(it, { decision: 'quote', title, qstatus: el.querySelector('#q-status').value,
-          item: (el.querySelector('input[name=q-item]:checked') || {}).value || 'อื่นๆ' }, 'เปิดใบเสนอราคาแล้ว');
+        const choice = { decision: 'quote', title, qstatus: el.querySelector('#q-status').value,
+          item: (el.querySelector('input[name=q-item]:checked') || {}).value || 'อื่นๆ' };
+        if (list.length > 1) decideMany(choice, list); else decide(it, choice, 'เปิดใบเสนอราคาแล้ว');
       };
     });
   }
@@ -1723,11 +1728,13 @@
   }
 
   function clusterHtml(list) {
-    const first = list[0][0], key = clusterKey(first), isNew = first.action === 'งานใหม่';
+    // กลุ่มใบเสนอราคา (AI: ใบเสนอราคาใหม่) เดิมตกไปเป็น "อัปเดต" แนบไม่ได้ (ผู้ใช้ 11 พ.ย. 2569)
+    const first = list[0][0], key = clusterKey(first), isQuote = !!first.quote, isNew = isQuote || first.action === 'งานใหม่';
     const items = list.map(x => x[0]), on = items.filter(it => !state.clusterOff.has(it.row));
     const conf = Math.min(...items.map(it => it.conf));
     const dup = isNew && items.some(it => it.dupes && it.dupes.length);
-    let html = '<div class="cluster"><div class="cl-head"><b>' + (isNew ? '🆕 งานใหม่ · ' + esc(first.title || 'ไม่มีชื่องาน') : '📂 อัปเดต ' + esc(first.jobLabel || first.job)) + '</b>' +
+    let html = '<div class="cluster"><div class="cl-head"><b>' + (isQuote ? '📄 ใบเสนอราคาใหม่ · ' + esc(first.title || 'ไม่มีชื่อ')
+      : isNew ? '🆕 งานใหม่ · ' + esc(first.title || 'ไม่มีชื่องาน') : '📂 อัปเดต ' + esc(first.jobLabel || first.job)) + '</b>' +
       '<span class="muted small">' + items.length + ' ก้อน · มั่นใจอย่างน้อย ' + conf + '%</span></div>' +
       (dup ? '<div class="cl-warn">⚠️ มีก้อนในกลุ่มนี้ที่อาจเปิดงานไปแล้ว กดเปิดงานเพื่อดูรายละเอียด</div>' : '');
     list.forEach(([it, i]) => {
@@ -1738,9 +1745,14 @@
         (open ? '' : '<div class="cl-text">' + esc(it.text) + '</div>') + '</div>' + (open ? reviewHtml(it, i) : '');
     });
     const n = on.length;
-    html += '<div class="actions">' + (isNew
-      ? '<button class="btn primary" data-cl="new" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>✓ เปิด 1 งาน รวม ' + n + ' ก้อน</button>'
-      : '<button class="btn primary" data-cl="attach" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>✓ แนบทั้งกลุ่ม (' + n + ')</button>') +
+    const dis = n ? '' : ' disabled';
+    const quoteBtn = '<button class="btn' + (isQuote ? ' primary' : '') + '" data-cl="quote" data-key="' + esc(key) + '"' + dis + '>' +
+      (isQuote ? '✓ เปิด 1 ใบเสนอราคา รวม ' + n + ' ก้อน' : '📄 เป็นใบเสนอราคา') + '</button>';
+    html += '<div class="actions">' + (isQuote
+      ? quoteBtn + '<button class="btn" data-cl="new" data-key="' + esc(key) + '"' + dis + '>＋ เป็นงานซ่อม</button>'
+      : isNew
+      ? '<button class="btn primary" data-cl="new" data-key="' + esc(key) + '"' + dis + '>✓ เปิด 1 งาน รวม ' + n + ' ก้อน</button>' + quoteBtn
+      : '<button class="btn primary" data-cl="attach" data-key="' + esc(key) + '"' + dis + '>✓ แนบทั้งกลุ่ม (' + n + ')</button>') +
       '<button class="btn" data-cl="other" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>📎 แนบงานอื่น</button>' +
       '<button class="btn" data-cl="notjob" data-key="' + esc(key) + '"' + (n ? '' : ' disabled') + '>ไม่เกี่ยว</button></div></div>';
     return html;
@@ -1756,6 +1768,7 @@
       if (!list.length) return;
       if (b.dataset.cl === 'notjob') { busy(b); decideMany({ decision: 'notjob' }, list); return; }
       if (b.dataset.cl === 'attach') { busy(b); decideMany({ decision: 'attach', job: list[0].job, status: '' }, list); return; }
+      if (b.dataset.cl === 'quote') { quoteFromReview(list); return; }
       state.selected = new Set(list.map(it => it.row));   // หน้าต่างเปิดงาน/แนบงาน บันทึกข้อที่เลือกอยู่
       if (b.dataset.cl === 'new') newSheet(list, data.statuses); else attachSheet(list, data.statuses);
     });
@@ -1815,6 +1828,7 @@
       '<button class="btn" id="bk-new">＋ รวมเป็นงานใหม่ 1 งาน</button>' +
       '<button class="btn" id="bk-attach">📎 แนบเข้างาน…</button>' +
       '<button class="btn" id="bk-notjob">ไม่เกี่ยว</button>' +
+      '<button class="btn" id="bk-quote">📄 รวมเป็นใบเสนอราคา 1 ใบ</button>' +
       '<button class="btn" id="bk-part">🔧 เปิดเป็นถอดอะไหล่</button></div>';
     bar.querySelector('#bk-clear').onclick = () => { state.selected.clear(); if (state.reviewMode === 'chat') drawChat(); else drawReview(); };
     bar.querySelector('#bk-accept').onclick = e => { busy(e.target); decideMany({ decision: 'accept' }); };
@@ -1823,6 +1837,7 @@
     bar.querySelector('#bk-new').onclick = () => newSheet(items, statuses);
     bar.querySelector('#bk-attach').onclick = () => attachSheet(items, statuses);
     bar.querySelector('#bk-part').onclick = () => partFromReview(items);
+    bar.querySelector('#bk-quote').onclick = () => quoteFromReview(items);
   }
 
   /** คิวตรวจ → ฟอร์มถอดอะไหล่ (เติมเลขงานที่ AI เสนอ + ข้อความแชทเป็นโน้ต) · บันทึกแล้ว ข้อในคิว = แนบเข้างานนั้น / ไม่มีเลขงาน = ไม่เกี่ยวกับงานซ่อม */
