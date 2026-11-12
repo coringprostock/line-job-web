@@ -2710,9 +2710,13 @@
       (p.arrivedAt ? '<div><span class="muted">อะไหล่มา</span> ' + esc(fmtMs(p.arrivedAt)) + (p.arrivedBy ? ' (' + esc(p.arrivedBy) + ')' : '') + '</div>' : '') +
       (p.doneAt ? '<div><span class="muted">ใส่คืน</span> ' + esc(fmtMs(p.doneAt)) + ' โดย ' + esc(p.doneBy) + '</div>' : '') +
       (p.note ? '<div><span class="muted">โน้ต</span> ' + esc(p.note) + '</div>' : '') + '</div>';
+    // ถอดหลายชิ้นจากเครื่องเดียวกัน (ผู้ใช้ 12 พ.ย. 2569): 1 ชิ้น = 1 เลข · Worker โยงด้วย SN ตรงกัน หรือกด "ถอดเพิ่มจากเครื่องนี้"
+    const sibs = data.siblings || [];
+    if (sibs.length) html += '<div class="panel-box"><b>🔩 ถอดจากเครื่องเดียวกัน (' + sibs.length + ')</b>' + sibs.map(x => '<div><a href="#part/' + x.id + '">' + esc(x.no) + '</a> ' +
+      esc(partName(x)) + ' <span class="pill ' + (x.status === 'รออะไหล่' || x.status === 'อะไหล่มาแล้ว' ? PART_LEVEL[x.level][2] : '') + '">' + esc(x.status) + '</span></div>').join('') + '</div>';
     if (data.files.length) html += '<div class="files">' + data.files.map(f => '<div class="file" data-pkey="' + esc(f.key) + '" data-url="' + esc(f.url) + '">' +
       (f.url ? '<img src="' + esc(f.url) + '" alt="">' : '<div class="vid small">📦 NAS<br>แตะดึง</div>') + '</div>').join('') + '</div>';
-    html += '<div class="actions"><button class="btn" id="p-edit">✏️ แก้ไขรายละเอียด</button>' +
+    html += '<div class="actions"><button class="btn" id="p-more">➕ ถอดเพิ่มจากเครื่องนี้</button><button class="btn" id="p-edit">✏️ แก้ไขรายละเอียด</button>' +
       (open ? '<button class="btn" id="p-reprint">🖨️ พิมพ์ป้ายซ้ำ</button>' : '') +
       (p.status === 'รออะไหล่' ? '<button class="btn primary" data-to="arrived">📦 อะไหล่มาแล้ว</button>' : '') +
       (open ? '<button class="btn' + (p.status === 'อะไหล่มาแล้ว' ? ' primary' : '') + '" data-to="done">✅ ใส่คืนแล้ว</button><button class="btn danger" data-to="cancel">ยกเลิกรายการ</button>'
@@ -2740,6 +2744,11 @@
       if (note) partAction(e.target, p.id, 'note', note);
     };
     document.getElementById('p-edit').onclick = () => partEditSheet(p);
+    document.getElementById('p-more').onclick = () => {
+      Object.keys(partForm).forEach(k => delete partForm[k]); partForm.files = [];
+      partFillFrom(p, true);
+      location.hash = '#part-new';
+    };
     const rp = document.getElementById('p-reprint');
     if (rp) rp.onclick = e => reprintLabel(e.target, { partId: p.id });
   }
@@ -2788,6 +2797,15 @@
   }
 
   const partForm = { files: [] }; // ฟอร์มที่กรอกค้างไว้
+  /** ถอดเพิ่มจากเครื่องเดียวกับรายการ p → เติมรุ่น/SN (+ งาน/ลูกค้า: all หรือช่องยังว่าง) · Worker ผูก from_id ให้ */
+  function partFillFrom(p, all) {
+    partForm.fromId = p.id;
+    partForm.fromLabel = p.no + ' ' + partName(p) + ' · ' + (partDonor(p) || '');
+    partForm.donorProduct = p.donorProduct || '';
+    partForm.donorSerial = p.donorSerial || '';
+    const empty = !String(partForm.jobNo || '').trim() && !String(partForm.customer || '').trim();
+    if (all || empty) Object.assign(partForm, { jobNo: noDigits(p.job || ''), customer: p.customer || '', phone: p.phone || '', province: p.province || '' });
+  }
   function renderPartNew(jobNo) {
     setTab('parts');
     claim();
@@ -2797,6 +2815,9 @@
       '<p class="muted small">ถอดอะไหล่จากเครื่องใหม่ไปใช้ก่อน → จ๊อบปริ้นป้าย "ห้ามขาย" ให้แปะเครื่อง และเตือนจนกว่าจะใส่คืน</p>' +
       (v.fromReview ? '<div class="panel-box"><b>จากคิวตรวจ ' + v.fromReview.length + ' ข้อ</b><div class="small" style="white-space:pre-wrap">' + esc(v.reviewText) + '</div>' +
         '<div class="muted small">บันทึกแล้ว ข้อนี้ออกจากคิวเอง (มีเลขงาน = แนบเข้างานนั้น · ไม่มี = ไม่เกี่ยวกับงานซ่อม)</div></div>' : '') +
+      (v.fromId ? '<div class="panel-box">➕ <b>ถอดเพิ่มจากเครื่องเดียวกับ ' + esc(v.fromLabel || '') + '</b><div class="muted small">ได้เลขใหม่ของชิ้นนี้ ป้าย/สถานะ/เตือนแยกกัน · หน้ารายการโชว์ชิ้นอื่นของเครื่องนี้</div>' +
+        '<button type="button" class="btn" id="pf-unfrom">✕ ไม่ใช่ เครื่องอื่น</button></div>'
+        : '<label class="field"><span class="lbl">ถอดเพิ่มจากเครื่องที่เคยถอดแล้ว? (ไม่บังคับ)</span><select id="pf-from"><option value="">— เครื่องใหม่ ยังไม่เคยถอด —</option></select></label>') +
       '<form id="pf" class="intake" autocomplete="off">' +
       '<label class="field"><span class="lbl">1. อะไหล่ที่ถอด <b class="req">*</b></span><input name="part" placeholder="เรียกตามที่เข้าใจ เช่น ปั๊มไฮดรอลิก" value="' + esc(v.part || '') + '"></label>' +
       '<div class="field"><span class="lbl">2. รูปอะไหล่</span><div class="files" id="pfiles"></div>' +
@@ -2817,6 +2838,23 @@
     const keep = () => { const fd = new FormData(form); ['part', 'donorProduct', 'donorSerial', 'jobNo', 'customer', 'phone', 'province'].forEach(k => { partForm[k] = fd.get(k); });
       partForm.print = form.print.checked; };
     form.oninput = keep; form.onchange = keep;
+    const unfrom = document.getElementById('pf-unfrom');
+    if (unfrom) unfrom.onclick = () => { keep(); ['fromId', 'fromLabel', 'donorProduct', 'donorSerial'].forEach(k => delete partForm[k]); renderPartNew(''); };   // รุ่น/SN มาจากเครื่องนั้น → ล้าง
+    const fromSel = document.getElementById('pf-from');
+    if (fromSel) {
+      // รายการที่ยังไม่ใส่คืน (เครื่องที่ยังถูกถอดอยู่) · เครื่องละบรรทัด
+      const fill = d => {
+        const seen = new Set();
+        d.open.forEach(x => { if (seen.has(x.machine)) return; seen.add(x.machine);
+          fromSel.appendChild(new Option(x.no + ' ' + partName(x) + ' · ' + (partDonor(x) || '') + (x.customer ? ' · ' + x.customer : ''), x.id)); });
+      };
+      if (state.parts) fill(state.parts); else core('parts').then(d => { state.parts = d; fill(d); }).catch(() => {});
+      fromSel.onchange = () => {
+        const x = state.parts && state.parts.open.find(o => String(o.id) === fromSel.value);
+        if (!x) return;
+        keep(); partFillFrom(x, false); renderPartNew('');
+      };
+    }
     const drawPF = () => {
       const el = document.getElementById('pfiles');
       if (!el) return;
