@@ -907,10 +907,11 @@
 
   async function moveMsgs(choice) {
     try {
-      const data = await api('moveMsgs', Object.assign({ no: state.jobData.job.no, msgIds: Array.from(state.moveSel) }, choice));
+      const from = state.jobData.job.no;
+      const data = await api('moveMsgs', Object.assign({ no: from, msgIds: Array.from(state.moveSel) }, choice));
       closeSheet();
       drawJob(data);
-      toast(data.moved.to ? 'ย้าย ' + data.moved.count + ' รายการไป ' + data.moved.label + ' ✅' : 'เอาออก ' + data.moved.count + ' รายการแล้ว ✅');
+      toast(data.moved.to ? 'ย้าย ' + data.moved.count + ' รายการจาก ' + from + ' ไป ' + data.moved.label + ' ✅' : 'เอาออก ' + data.moved.count + ' รายการจาก ' + from + ' แล้ว ✅');
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ ' + err.message);
       unbusy();
@@ -981,7 +982,7 @@
           '<p>ขอบคุณครับ 🙏</p><p class="muted small">น้องจ๊อบส่งสรุปไว้ในแชทให้แล้ว</p>' +
           '<p>🤖 <b>AI จะสรุปการซ่อมให้เอง</b><br><span class="muted small">อ่านจากสรุปการแก้ไขและไทม์ไลน์ของงาน ใน 1–2 นาที ขึ้นเป็นกรอบ “📋 สรุปการซ่อม” ในหน้างาน อ่าน/แก้ทีหลังได้</span></p>' +
           '<div class="actions"><button class="btn primary" data-close>ตกลง</button></div></div>');
-      } else toast(okMsg + ' ✅');
+      } else toast(okMsg + ' · งาน ' + no + ' ✅');
     } catch (err) {
       if (err.message !== 'login') toast('⚠️ บันทึกไม่สำเร็จ: ' + err.message);
       if (before && /^#job\//.test(location.hash)) drawJob(before);
@@ -1177,7 +1178,7 @@
             const page = await api('job', { no: data.job.no });   // แถว "สรุปการซ่อม" ในไทม์ไลน์
             if (/^#job\//.test(location.hash)) drawJob(page);
           }
-          toast('บันทึกสรุปการซ่อมแล้ว ✅ ขอบคุณครับ');
+          toast('บันทึกสรุปการซ่อมงาน ' + data.job.no + ' แล้ว ✅ ขอบคุณครับ');
         } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
     });
@@ -1219,7 +1220,7 @@
         toast('🤖 AI กำลังอ่านรูป เติมข้อมูลงาน…');
         const out = await core('addFiles', { no: data.job.no, files: keys });
         if (/^#job\//.test(location.hash)) drawJob(out);
-        toast('เพิ่มรูปเข้างานแล้ว ✅' + aiNote(out.ai) + (out.aiDoubt ? ' · ⚠️ ' + out.aiDoubt : ''));
+        toast('เพิ่มรูปเข้างาน ' + data.job.no + ' แล้ว ✅' + aiNote(out.ai) + (out.aiDoubt ? ' · ⚠️ ' + out.aiDoubt : ''));
       } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); }
     };
   }
@@ -1263,7 +1264,7 @@
           const out = await core('editInfo', { no: data.job.no, info });
           closeSheet();
           if (/^#job\//.test(location.hash)) drawJob(out);
-          toast('บันทึกข้อมูลงานแล้ว ✅');
+          toast('บันทึกข้อมูลงาน ' + data.job.no + ' แล้ว ✅');
         } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
     });
@@ -1308,7 +1309,7 @@
         try {
           const out = await api('quoteResult', { no: data.job.no, result, repair, note: el.querySelector('#q-note').value.trim() });
           closeSheet();
-          toast(out.repair ? 'บันทึกแล้ว เปิดงานซ่อม ' + out.repair + ' ✅' : 'บันทึกผลแล้ว ✅');
+          toast(out.repair ? 'บันทึกผล ' + data.job.no + ' แล้ว เปิดงานซ่อม ' + out.repair + ' ✅' : 'บันทึกผล ' + data.job.no + ' แล้ว ✅');
           if (out.repair) location.hash = '#job/' + noDigits(out.repair); else renderJob(noDigits(data.job.no)).catch(showError);
         } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); unbusy(); }
       };
@@ -1866,8 +1867,28 @@
     if (!picked.length) return;
     const items = picked.map(it => ({ row: it.row, msgId: it.msgId }));
     queueSave(picked, () => api('decideMany', Object.assign({ items }, choice)),
-      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' + (out.why && out.why.length ? ' (' + out.why.join(' / ') + ')' : '') : '') +
-        (out.job ? ' · ' + out.job : '') + aiNote(out.ai), err => dupeAsk(picked, choice, err));
+      out => 'ทำแล้ว ' + out.done + ' ข้อ' + (out.done && out.results ? ' · ' + verdictSummary(out.results.filter(r => r.verdict).map(r => r.verdict)) : out.job ? ' · ' + out.job : '') +
+        (out.skipped ? ' · ข้าม ' + out.skipped + ' ข้อ' + (out.why && out.why.length ? ' (' + out.why.join(' / ') + ')' : '') : '') +
+        aiNote(out.ai), err => dupeAsk(picked, choice, err));
+  }
+
+  // ผลตัดสินจากระบบ ('งานใหม่ #0131' 'อัปเดต #0131' 'เสนอราคา #0200' 'อัปเดต #0131 · อะไหล่ P-0003' 'ไม่เกี่ยว') → ข้อความแจ้งที่มีเลขงานเสมอ
+  // หลายข้อเข้างานเดียวกัน = บรรทัดเดียว (ข้อแรกเปิดงาน ที่เหลือแนบ → "เปิดงานใหม่ #0131") (ผู้ใช้ 12 พ.ย. 2569)
+  const VERDICT_TH = { 'งานใหม่': 'เปิดงานใหม่', 'เสนอราคา': 'เปิดใบเสนอราคา', 'อัปเดต': 'แนบเข้างาน' };
+  function verdictSummary(list) {
+    const g = new Map();
+    list.forEach(v => {
+      const part = (v.match(/อะไหล่ (\S+)/) || [])[1];
+      const m = v.match(/^(งานใหม่|เสนอราคา|อัปเดต) (#\d+)/);
+      const key = part ? 'p' + part : m ? m[2] : v;
+      const label = part ? 'แนบเข้า ' + part + (m ? ' (งาน ' + m[2] + ')' : '') : m ? VERDICT_TH[m[1]] + ' ' + m[2] : v === 'ไม่เกี่ยว' ? 'ไม่เกี่ยวกับงาน' : v;
+      const opens = !!m && m[1] !== 'อัปเดต' && !part;
+      const cur = g.get(key);
+      if (!cur) g.set(key, { label, n: 1, opens });
+      else { cur.n++; if (opens && !cur.opens) Object.assign(cur, { label, opens }); }
+    });
+    const out = [...g.values()];
+    return out.map(x => x.label + (out.length > 1 ? ' (' + x.n + ' ข้อ)' : '')).join(' · ');
   }
 
   // AI อ่านข้อความ/รูปแล้วเติมข้อมูลงานให้ (Worker) → บอกว่าเติมช่องไหน
@@ -1977,7 +1998,7 @@
   let saveChain = Promise.resolve(), saving = 0;
   const pendingRows = new Set(); // ข้อที่ส่งบันทึกแล้วแต่ยังไม่เสร็จ: โหลดคิวระหว่างนี้ต้องไม่แสดงซ้ำ
   function decide(it, choice, okMsg) {
-    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => (okMsg || out.verdict) + aiNote(out.ai),
+    queueSave([it], () => api('decide', Object.assign({ row: it.row, msgId: it.msgId }, choice)), out => (out.verdict ? verdictSummary([out.verdict]) : okMsg || 'บันทึกแล้ว') + aiNote(out.ai),
       err => dupeAsk([it], choice, err));
   }
 
@@ -2745,7 +2766,7 @@
         try {
           const out = await core('updatePart', { id: p.id, part });
           closeSheet();
-          toast(out.changed ? 'แก้ไขแล้ว ' + out.changed + ' ช่อง ✅' : 'ไม่มีอะไรเปลี่ยน');
+          toast(out.changed ? 'แก้ไข ' + p.no + ' แล้ว ' + out.changed + ' ช่อง ✅' : 'ไม่มีอะไรเปลี่ยน');
           state.parts = null;
           drawPart(await core('part', { id: p.id }));
         } catch (err) { if (err.message !== 'login') toast(err.message); unbusy(); }
@@ -2759,9 +2780,10 @@
     try {
       await core('setPart', { id, to, note });
       closeSheet();
-      toast({ arrived: 'บันทึกแล้ว จ๊อบแจ้งช่างที่ถอดให้แล้ว ✅', done: 'ใส่คืนแล้ว ✅', cancel: 'ยกเลิกแล้ว', reopen: 'เปิดใหม่แล้ว', note: 'บันทึกโน้ตแล้ว' }[to]);
       state.parts = null;
-      drawPart(await core('part', { id }));
+      const p = await core('part', { id });
+      toast(p.part.no + ' ' + { arrived: 'ของมาถึงแล้ว จ๊อบแจ้งช่างที่ถอดให้แล้ว ✅', done: 'ใส่คืนแล้ว ✅', cancel: 'ยกเลิกแล้ว', reopen: 'เปิดใหม่แล้ว', note: 'บันทึกโน้ตแล้ว' }[to]);
+      drawPart(p);
     } catch (err) { if (err.message !== 'login') toast(err.message); unbusy(); }
   }
 
