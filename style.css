@@ -192,7 +192,8 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
 
 /* แผ่นล่าง */
 .sheet {
-  position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .35); display: flex; align-items: flex-end;
+  /* 50 = เหนือหน้าดูรูป .viewer (40): ปุ่ม ⭐ ในหน้าดูรูปเปิดหน้าต่างเลือกสินค้า เดิมไปอยู่ข้างหลัง กดแล้วเหมือนไม่มีอะไรเกิดขึ้น (ผู้ใช้ 12 พ.ย. 2569) */
+  position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .35); display: flex; align-items: flex-end;
 }
 .sheet .panel {
   width: 100%; max-width: 760px; margin: 0 auto; background: var(--card); border-radius: 16px 16px 0 0;
@@ -204,7 +205,7 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; }
   padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
 }
 .toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
   background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 999px; max-width: 90vw;
 }
 
@@ -478,6 +479,7 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 .nstep .field { margin: 0; }
 .btn.mic { flex: 0 0 auto; align-self: flex-start; }
 #nsubmit:not(.ready) { opacity: .6; }
+#psubmit:not(.ready) { opacity: .6; }
 
 /* ป้ายเตือนต่ออายุ API key (เฉพาะเจ้าของระบบ) */
 .key-alert { position: relative; margin: 8px 16px 0; padding: 10px 36px 10px 12px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 14px; }

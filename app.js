@@ -784,11 +784,15 @@
       body.innerHTML = '<img src="' + esc(m.url) + '" alt="รูปเต็ม"><div class="viewer-hint">แตะรูปเพื่อขยายขนาดจริง / ย่อกลับ</div>';
       const img = body.querySelector('img');
       img.onclick = () => body.classList.toggle('zoom');
-      const jm = location.hash.match(/^#job\/(\d+)/);
-      if (jm) { // รูปในหน้างาน → ใช้เป็นรูปตัวอย่างของสินค้า (หน้า "สินค้า")
+      // รูปจากหน้างาน / ถอดอะไหล่ / คิวตรวจ / ค้นหา → ใช้เป็นรูปตัวอย่างของสินค้า (สอน AI แยกรุ่น) · ยกเว้นหน้าสินค้าเอง (เป็นรูปตัวอย่างอยู่แล้ว)
+      const jm = location.hash.match(/^#job\/(\d+)/), pmh = location.hash.match(/^#part\/(\d+)/);
+      if (!/^#product/.test(location.hash) && (ref.key || ref.msgId)) {
         const star = Object.assign(document.createElement('button'), { className: 'btn', textContent: '⭐ ใช้เป็นรูปตัวอย่างสินค้า' });
         v.querySelector('.viewer-bar').insertBefore(star, v.querySelector('#v-dl'));
-        star.onclick = () => refPickSheet(ref.key ? { key: ref.key, job: '#' + jm[1].padStart(4, '0') } : { msgId: ref.msgId, job: '#' + jm[1].padStart(4, '0') });
+        const from = ref.key ? { key: ref.key } : { msgId: ref.msgId };
+        if (jm) from.job = '#' + jm[1].padStart(4, '0');
+        else from.where = pmh ? 'ถอดอะไหล่ P-' + pmh[1].padStart(4, '0') : location.hash === '#review' ? 'คิวตรวจ' : 'แชท';
+        star.onclick = () => refPickSheet(from);
       }
     } else if (type === 'video') {
       body.innerHTML = '<video src="' + esc(m.url) + '" controls playsinline autoplay></video>';
@@ -1846,6 +1850,7 @@
   function partFromReview(items) {
     Object.keys(partForm).forEach(k => delete partForm[k]);
     partForm.files = [];
+    partForm.print = false;   // จากคิวตรวจ = ช่างหน้างานอาจปริ้น/แปะไปแล้ว → ไม่ปริ้นเอง (ติ๊กเองได้) · ทางอื่นปริ้นป้ายเสมอ
     partForm.fromReview = items.map(it => ({ row: it.row, msgId: it.msgId }));
     partForm.reviewText = items.map(it => fmtDateTime(it.time) + ' ' + it.sender + ': ' + it.text).join('\n').slice(0, 400);
     const job = items.map(it => it.jobLabel || it.inJob || '').find(Boolean);
@@ -2797,6 +2802,31 @@
   }
 
   const partForm = { files: [] }; // ฟอร์มที่กรอกค้างไว้
+  // ข้อไหนครบ → เขียว ✓ · ข้อแรกที่ยังไม่ครบ = กรอบส้ม · บังคับแค่ 1 อะไหล่ + 3 SN (งาน/ลูกค้า/จังหวัดไม่บังคับ · ผู้ใช้ 12 พ.ย. 2569)
+  const PSTEP_OK = {
+    1: f => !!String(f.part.value).trim(),
+    2: () => partForm.files.some(x => x.key),
+    3: f => { const sn = String(f.donorSerial.value).trim(); return !!sn && (!sn.includes('?') || sn.startsWith('ป้ายชำรุด')); },
+    4: f => !!String(f.jobNo.value).trim() || !!String(f.customer.value).trim() || !!f.province.value
+  };
+  function drawPartSteps(scroll) {
+    const form = document.getElementById('pf');
+    if (!form) return;
+    // กรอบส้ม = ข้อบังคับข้อแรกที่ยังขาด · บังคับครบแล้ว = ข้อไม่บังคับข้อแรกที่ยังว่าง (บอกว่าใส่ได้/ข้ามได้)
+    const secs = [...form.querySelectorAll('.nstep')].map(sec => ({ sec, k: Number(sec.dataset.step), ok: PSTEP_OK[sec.dataset.step](form), req: sec.dataset.step === '1' || sec.dataset.step === '3' }));
+    const need = secs.filter(x => x.req && x.ok).length;
+    const first = secs.find(x => x.req && !x.ok) || secs.find(x => !x.ok);
+    const active = first ? first.k : 0;
+    secs.forEach(({ sec, k, ok, req }) => {
+      sec.classList.toggle('ok', ok);
+      sec.classList.toggle('on', !ok && active === k);
+      sec.querySelector('.nstep-dot').textContent = ok ? '✓' : k;
+      sec.querySelector('.nstep-state').textContent = ok ? '✓ ได้แล้ว' : active === k ? (req ? '👉 กรอกข้อนี้' : '👉 ใส่ได้ถ้ามี / ข้ามได้') : req ? 'ต้องกรอก' : '';
+    });
+    document.getElementById('pprog').textContent = need === 2 ? '✅ ข้อบังคับครบแล้ว กดบันทึกได้' : 'ข้อบังคับ ' + need + '/2';
+    document.getElementById('psubmit').classList.toggle('ready', need === 2);
+    if (scroll && active) form.querySelector('.nstep[data-step="' + active + '"]').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
   /** ถอดเพิ่มจากเครื่องเดียวกับรายการ p → เติมรุ่น/SN (+ งาน/ลูกค้า: all หรือช่องยังว่าง) · Worker ผูก from_id ให้ */
   function partFillFrom(p, all) {
     partForm.fromId = p.id;
@@ -2811,32 +2841,38 @@
     claim();
     const v = partForm;
     if (jobNo && !v.jobNo) v.jobNo = jobNo;
-    $app.innerHTML = '<a class="back" href="#parts">‹ ถอดอะไหล่</a><h1>🔧 บันทึกถอดอะไหล่</h1>' +
-      '<p class="muted small">ถอดอะไหล่จากเครื่องใหม่ไปใช้ก่อน → จ๊อบปริ้นป้าย "ห้ามขาย" ให้แปะเครื่อง และเตือนจนกว่าจะใส่คืน</p>' +
+    // เป็นข้อมีกรอบบอกว่าต้องทำข้อไหน แบบหน้าแจ้งงานซ่อม (ผู้ใช้ 12 พ.ย. 2569 · เปิดจากเมนู "ถอดอะไหล่" ในแชทได้เลย) · บังคับแค่ข้อ 1 + 3
+    const step = (k, title, req, inner) => '<section class="nstep" data-step="' + k + '"><div class="nstep-dot">' + k + '</div><div class="nstep-body">' +
+      '<div class="nstep-head"><b>' + title + '</b>' + (req ? ' <b class="req">*</b>' : ' <span class="muted small">(ไม่บังคับ)</span>') +
+      '<span class="nstep-state"></span></div>' + inner + '</div></section>';
+    $app.innerHTML = '<a class="back" href="#parts">‹ ถอดอะไหล่</a>' +
       (v.fromReview ? '<div class="panel-box"><b>จากคิวตรวจ ' + v.fromReview.length + ' ข้อ</b><div class="small" style="white-space:pre-wrap">' + esc(v.reviewText) + '</div>' +
         '<div class="muted small">บันทึกแล้ว ข้อนี้ออกจากคิวเอง (มีเลขงาน = แนบเข้างานนั้น · ไม่มี = ไม่เกี่ยวกับงานซ่อม)</div></div>' : '') +
-      (v.fromId ? '<div class="panel-box">➕ <b>ถอดเพิ่มจากเครื่องเดียวกับ ' + esc(v.fromLabel || '') + '</b><div class="muted small">ได้เลขใหม่ของชิ้นนี้ ป้าย/สถานะ/เตือนแยกกัน · หน้ารายการโชว์ชิ้นอื่นของเครื่องนี้</div>' +
-        '<button type="button" class="btn" id="pf-unfrom">✕ ไม่ใช่ เครื่องอื่น</button></div>'
-        : '<label class="field"><span class="lbl">ถอดเพิ่มจากเครื่องที่เคยถอดแล้ว? (ไม่บังคับ)</span><select id="pf-from"><option value="">— เครื่องใหม่ ยังไม่เคยถอด —</option></select></label>') +
-      '<form id="pf" class="intake" autocomplete="off">' +
-      '<label class="field"><span class="lbl">1. อะไหล่ที่ถอด <b class="req">*</b></span><input name="part" placeholder="เรียกตามที่เข้าใจ เช่น ปั๊มไฮดรอลิก" value="' + esc(v.part || '') + '"></label>' +
-      '<div class="field"><span class="lbl">2. รูปอะไหล่</span><div class="files" id="pfiles"></div>' +
-      '<label class="btn"><input type="file" id="ppick" accept="image/*" multiple hidden>＋ ถ่าย / เลือกรูป</label></div>' +
-      '<label class="field"><span class="lbl">3. ถอดจากเครื่องใหม่รุ่น</span><input name="donorProduct" list="plist2" value="' + esc(v.donorProduct || '') + '"><datalist id="plist2">' +
-        PRODUCT_HINTS.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist></label>' +
-      '<div class="field"><span class="lbl">SN เครื่องที่ถอด <b class="req">*</b> (ป้ายเลือนพิมพ์ "ป้ายชำรุด" · ไม่มีป้ายพิมพ์ "ไม่มี SN")</span><input name="donorSerial" value="' + esc(v.donorSerial || '') + '">' +
-        '<label class="btn"><input type="file" id="pplate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่องให้ AI อ่าน SN</label><div class="muted small" id="pplate-out"></div></div>' +
-      '<label class="field"><span class="lbl">4. ของงานไหน: เลขงานซ่อม</span><input name="jobNo" inputmode="numeric" placeholder="เช่น 131" value="' + esc(v.jobNo || '') + '"></label>' +
-      '<div class="muted small">หรือ ถ้าไม่มีเลขงาน</div>' +
-      '<label class="field"><span class="lbl">ชื่อลูกค้า</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
-      '<label class="field"><span class="lbl">เบอร์ลูกค้า (ถ้ามี)</span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label>' +
-      '<label class="field"><span class="lbl">จังหวัด</span><select name="province"><option value=""></option>' +
-        PROVINCES.map(x => '<option' + (x === v.province ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>' +
-      '<label class="check"><input type="checkbox" name="print"' + (v.print === false ? '' : ' checked') + '> ปริ้นป้าย "ห้ามขาย" แปะเครื่องที่ถอด</label>' +
+      '<form id="pf" class="intake steps" autocomplete="off">' +
+      '<div class="nsteps-top"><b>🔧 บันทึกถอดอะไหล่</b> <span id="pprog" class="muted small"></span></div>' +
+      '<p class="muted small">ถอดอะไหล่จากเครื่องใหม่ไปใช้ก่อน → จ๊อบปริ้นป้าย "ห้ามขาย" ให้แปะเครื่อง และเตือนจนกว่าจะใส่คืน</p>' +
+      step(1, '🔩 อะไหล่ที่ถอด', true, '<input name="part" placeholder="เรียกตามที่เข้าใจ เช่น ปั๊มไฮดรอลิก" value="' + esc(v.part || '') + '">') +
+      step(2, '📷 รูปอะไหล่', false, '<div class="files" id="pfiles"></div>' +
+        '<label class="btn step-btn"><input type="file" id="ppick" accept="image/*" multiple hidden>📷 ถ่าย / เลือกรูป</label>') +
+      step(3, '🏷️ เครื่องใหม่ที่ถูกถอด (SN)', true,
+        (v.fromId ? '<div class="panel-box">➕ <b>ถอดเพิ่มจากเครื่องเดียวกับ ' + esc(v.fromLabel || '') + '</b><div class="muted small">ได้เลขใหม่ของชิ้นนี้ ป้าย/สถานะ/เตือนแยกกัน · หน้ารายการโชว์ชิ้นอื่นของเครื่องนี้</div>' +
+          '<button type="button" class="btn" id="pf-unfrom">✕ ไม่ใช่ เครื่องอื่น</button></div>'
+          : '<label class="field"><span class="lbl">ถอดเพิ่มจากเครื่องที่เคยถอดแล้ว? (ไม่บังคับ)</span><select id="pf-from"><option value="">— เครื่องใหม่ ยังไม่เคยถอด —</option></select></label>') +
+        '<label class="btn step-btn"><input type="file" id="pplate" accept="image/*" capture="environment" hidden>📷 ถ่ายป้ายเครื่องให้ AI อ่าน SN</label><div class="muted small" id="pplate-out"></div>' +
+        '<label class="field"><span class="lbl">SN เครื่องที่ถอด (ป้ายเลือนพิมพ์ "ป้ายชำรุด" · ไม่มีป้ายพิมพ์ "ไม่มี SN")</span><input name="donorSerial" value="' + esc(v.donorSerial || '') + '"></label>' +
+        '<label class="field"><span class="lbl">รุ่นเครื่อง</span><input name="donorProduct" list="plist2" value="' + esc(v.donorProduct || '') + '"><datalist id="plist2">' +
+          PRODUCT_HINTS.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist></label>') +
+      step(4, '👤 ให้งาน / ลูกค้าไหน', false, '<p class="muted small">ยังไม่รู้ว่าให้ใคร เว้นไว้ได้ เติมทีหลังในรายการ (✏️ แก้ไขรายละเอียด)</p>' +
+        '<label class="field"><span class="lbl">เลขงานซ่อม</span><input name="jobNo" inputmode="numeric" placeholder="เช่น 131" value="' + esc(v.jobNo || '') + '"></label>' +
+        '<label class="field"><span class="lbl">หรือ ชื่อลูกค้า</span><input name="customer" value="' + esc(v.customer || '') + '"></label>' +
+        '<label class="field"><span class="lbl">เบอร์ลูกค้า</span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label>' +
+        '<label class="field"><span class="lbl">จังหวัด</span><select name="province"><option value=""></option>' +
+          PROVINCES.map(x => '<option' + (x === v.province ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>') +
+      '<label class="check"><input type="checkbox" name="print"' + (v.print === false ? '' : ' checked') + '> ปริ้นป้าย "ห้ามขาย" แปะเครื่องที่ถอด' + (v.fromReview ? ' <span class="muted">(จากคิวตรวจ ไม่ปริ้นเอง ติ๊กถ้าต้องการ)</span>' : '') + '</label>' +
       '<button class="btn primary wide" id="psubmit">บันทึกถอดอะไหล่</button></form>';
     const form = document.getElementById('pf');
     const keep = () => { const fd = new FormData(form); ['part', 'donorProduct', 'donorSerial', 'jobNo', 'customer', 'phone', 'province'].forEach(k => { partForm[k] = fd.get(k); });
-      partForm.print = form.print.checked; };
+      partForm.print = form.print.checked; drawPartSteps(); };
     form.oninput = keep; form.onchange = keep;
     const unfrom = document.getElementById('pf-unfrom');
     if (unfrom) unfrom.onclick = () => { keep(); ['fromId', 'fromLabel', 'donorProduct', 'donorSerial'].forEach(k => delete partForm[k]); renderPartNew(''); };   // รุ่น/SN มาจากเครื่องนั้น → ล้าง
@@ -2862,13 +2898,15 @@
         (f.state ? '<span class="fstate' + (f.error ? ' bad' : '') + '">' + esc(f.state) + '</span>' : '') +
         '<button type="button" class="fdel" data-i="' + i + '" aria-label="ลบ">✕</button></div>').join('');
       el.querySelectorAll('.fdel').forEach(b => b.onclick = () => { partForm.files.splice(Number(b.dataset.i), 1); drawPF(); });
+      drawPartSteps();
     };
     const add = file => {
       const item = { url: URL.createObjectURL(file), state: 'กำลังส่ง' };
       partForm.files.push(item); drawPF();
-      uploadFile(file).then(k => { item.key = k; item.state = ''; }).catch(err => { item.state = 'ส่งไม่สำเร็จ'; item.error = true; toast(err.message); }).then(drawPF);
+      uploadFile(file).then(k => { item.key = k; item.state = ''; }).catch(err => { item.state = 'ส่งไม่สำเร็จ'; item.error = true; toast(err.message); }).then(() => { drawPF(); drawPartSteps(true); });
     };
     drawPF();
+    drawPartSteps();
     window.partDrawFiles = drawPF; // รูปจากแชท (คิวตรวจ) ดึงเสร็จทีหลัง
     document.getElementById('ppick').onchange = e => { [...e.target.files].forEach(add); e.target.value = ''; };
     document.getElementById('pplate').onchange = async e => {
@@ -2885,6 +2923,7 @@
         if (!form.donorProduct.value && model) form.donorProduct.value = model;
         keep();
         out.textContent = (r.damaged ? '🏷️ ป้ายชำรุด อ่านได้บางส่วน ' : '✅ AI อ่านได้ ') + r.serial + ' — ตรวจว่าตรงป้าย';
+        drawPartSteps(true);
       } catch (err) { if (err.message !== 'login') out.textContent = '⚠️ ' + err.message; }
     };
     form.onsubmit = async e => {
@@ -2893,12 +2932,11 @@
       if (partForm.files.some(f => f.state === 'กำลังส่ง' || f.loading)) return toast('รอส่ง/ดึงรูปให้เสร็จก่อน');
       if (!String(partForm.part || '').trim()) return toast(CORE_ERRORS.no_part);
       if (!String(partForm.donorSerial || '').trim()) return toast(CORE_ERRORS.no_donor_serial);
-      if (!String(partForm.jobNo || '').trim() && !String(partForm.customer || '').trim()) return toast(CORE_ERRORS.no_target);
-      if (!String(partForm.jobNo || '').trim() && !partForm.province) return toast('เลือกจังหวัดของลูกค้า');
       const btn = document.getElementById('psubmit');
       busy(btn);
       try {
-        const out = await core('createPart', { part: Object.assign({}, partForm, { files: partForm.files.filter(f => f.key).map(f => f.key),
+        const fromMenu = state.fromPartMenu && window.liff && liff.isInClient && liff.isInClient();
+        const out = await core('createPart', { part: Object.assign({}, partForm, { dm: !!fromMenu, files: partForm.files.filter(f => f.key).map(f => f.key),
           note: partForm.reviewText ? 'จากแชทกลุ่ม: ' + partForm.reviewText : '' }) });
         if (partForm.fromReview) { // ข้อในคิวตรวจที่มาจากแชทนี้ → เข้ารายการใหม่ (รายการผูกงาน = เข้างานนั้นด้วย) · บันทึกเบื้องหลัง
           const items = partForm.fromReview;
@@ -2907,8 +2945,18 @@
         partForm.files.forEach(f => URL.revokeObjectURL(f.url));
         Object.keys(partForm).forEach(k => delete partForm[k]); partForm.files = [];
         state.parts = null;
-        toast('บันทึก ' + out.no + ' แล้ว' + (out.print ? ' · ส่งปริ้นป้ายแล้ว' : '') + ' ✅');
         location.hash = '#part/' + out.id;
+        if (fromMenu) { // เมนู "ถอดอะไหล่" ในแชทน้องจ๊อบ → แจ้งผล แล้วปิดกลับแชท (จ๊อบส่งการ์ดหลักฐานให้แล้ว) แบบหน้าแจ้งงานซ่อม
+          state.fromPartMenu = false;
+          let timer = 0;
+          sheet('<div class="created-pop"><div class="pop-ok">✅</div><h2>บันทึกถอดอะไหล่แล้ว</h2><div class="big-no">' + esc(out.no) + '</div>' +
+            '<p>' + (out.dm ? 'จ๊อบส่งการ์ดรายการให้ในแชทแล้ว' : 'บันทึกแล้ว (ส่งการ์ดในแชทไม่สำเร็จ ดูได้ที่แท็บอะไหล่)') + (out.print ? ' · ส่งปริ้นป้าย "ห้ามขาย" แล้ว' : '') + '</p>' +
+            '<p class="muted small">กำลังกลับไปที่แชท…</p><div class="actions"><button class="btn primary" id="go-chat">กลับแชทเลย</button><button class="btn" id="stay">อยู่ต่อ ดูรายการ</button></div></div>', el => {
+            el.querySelector('#go-chat').onclick = () => liff.closeWindow();
+            el.querySelector('#stay').onclick = () => { clearTimeout(timer); closeSheet(); };
+          });
+          timer = setTimeout(() => liff.closeWindow(), 2000);
+        } else toast('บันทึก ' + out.no + ' แล้ว' + (out.print ? ' · ส่งปริ้นป้ายแล้ว' : '') + ' ✅');
       } catch (err) { if (err.message !== 'login') toast(err.message); unbusy(); }
     };
   }
@@ -3050,16 +3098,22 @@
   async function refPickSheet(from) {
     let list;
     try { list = (state.products || (state.products = await core('products'))).products; } catch (err) { if (err.message !== 'login') toast('⚠️ ' + err.message); return; }
-    sheet('<h2>⭐ ใช้เป็นรูปตัวอย่างสินค้า</h2><label class="field"><span class="lbl">สินค้า</span><select id="r-p">' +
-      list.map(p => '<option value="' + p.id + '">' + esc(p.name) + '</option>').join('') + '</select></label>' +
+    // เลือกให้ก่อนจากสินค้า/รุ่นของงานที่เปิดอยู่ (ถ้ามี) · คนตรวจแก้ได้
+    const jd = state.jobData && from.job && state.jobData.job && ('#' + noDigits(state.jobData.job.no).padStart(4, '0')) === from.job ? state.jobData : null;
+    const hint = jd ? [jd.job.product, jd.info && jd.info.product, jd.info && jd.info.model].filter(Boolean).join(' ').toLowerCase() : '';
+    const guess = hint ? list.find(p => hint.includes(String(p.name).toLowerCase()) || p.models.some(m => m && hint.includes(String(m).toLowerCase()))) : null;
+    sheet('<h2>⭐ ใช้เป็นรูปตัวอย่างสินค้า</h2><p class="muted small">บอกว่ารูปนี้เป็นสินค้าชนิดไหน รุ่นอะไร · AI ใช้เทียบเวลาแยกรุ่นจากรูป</p><label class="field"><span class="lbl">สินค้า</span><select id="r-p">' +
+      list.map(p => '<option value="' + p.id + '"' + (guess && guess.id === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
       '<label class="field"><span class="lbl">รุ่น</span><select id="r-m"></select></label>' +
       '<div class="actions"><button class="btn primary" id="r-ok">เพิ่มรูป</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
       const sel = el.querySelector('#r-p'), mod = el.querySelector('#r-m');
-      const fill = () => { const p = list.find(x => String(x.id) === sel.value); mod.innerHTML = '<option value="">(ไม่ระบุรุ่น)</option>' + (p ? p.models.map(m => '<option>' + esc(m) + '</option>').join('') : ''); };
+      const fill = () => { const p = list.find(x => String(x.id) === sel.value); mod.innerHTML = '<option value="">(ไม่ระบุรุ่น)</option>' +
+        (p ? p.models.map(m => '<option' + (hint && m && hint.includes(String(m).toLowerCase()) ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : ''); };
       sel.onchange = fill; fill();
       el.querySelector('#r-ok').onclick = async e => {
         busy(e.target);
-        try { await core('addProductImages', { id: Number(sel.value), model: mod.value, from }); state.products = null; closeSheet(); toast('เพิ่มเป็นรูปตัวอย่างแล้ว ✅'); }
+        try { await core('addProductImages', { id: Number(sel.value), model: mod.value, from }); state.products = null; closeSheet();
+          toast('เพิ่มเป็นรูปตัวอย่างของ ' + ((list.find(x => String(x.id) === sel.value) || {}).name || 'สินค้า') + (mod.value ? ' รุ่น ' + mod.value : '') + ' แล้ว ✅'); }
         catch (err) { unbusy(); if (err.message !== 'login') toast('⚠️ ' + err.message); }
       };
     });
@@ -3155,9 +3209,10 @@
       // ยกเว้นลิงก์ "เปิดหน้างาน" จากการ์ดในแชท (?job=0131) หรือ ?view=review
       const params = new URLSearchParams(location.search);
       state.fromMenu = params.get('view') === 'new';   // เมนู "แจ้งงานซ่อม" → บันทึกแล้วกลับแชท
+      state.fromPartMenu = params.get('view') === 'part-new';   // เมนู "ถอดอะไหล่" → ฟอร์มเว็บ บันทึกแล้วกลับแชท (ผู้ใช้ 12 พ.ย. 2569)
       state.openRepair = params.get('repair') === '1';  // ลิงก์ "สรุปการซ่อม" ที่น้องจ๊อบส่งหลังปิดงาน
       const start = params.get('job') ? '#job/' + params.get('job').replace(/\D/g, '')
-        : params.get('part') ? '#part/' + params.get('part').replace(/\D/g, '') : params.get('view') === 'parts' ? '#parts'
+        : params.get('part') ? '#part/' + params.get('part').replace(/\D/g, '') : params.get('view') === 'parts' ? '#parts' : params.get('view') === 'part-new' ? '#part-new'
         : params.get('view') === 'review' ? '#review' : params.get('view') === 'new' ? '#new' : params.get('view') === 'search' ? '#search' : '#board';
       // ลบ ?job= ออกจาก URL หลังใช้แล้ว: รีเฟรช / LINE เปิดหน้าต่างเดิมซ้ำ จะไม่ค้างที่งานเดิม (กดย้อนกลับไปบอร์ดได้ตามปกติ)
       history.replaceState(null, '', location.pathname + start);
