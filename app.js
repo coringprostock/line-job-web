@@ -3102,19 +3102,46 @@
     const jd = state.jobData && from.job && state.jobData.job && ('#' + noDigits(state.jobData.job.no).padStart(4, '0')) === from.job ? state.jobData : null;
     const hint = jd ? [jd.job.product, jd.info && jd.info.product, jd.info && jd.info.model].filter(Boolean).join(' ').toLowerCase() : '';
     const guess = hint ? list.find(p => hint.includes(String(p.name).toLowerCase()) || p.models.some(m => m && hint.includes(String(m).toLowerCase()))) : null;
-    sheet('<h2>⭐ ใช้เป็นรูปตัวอย่างสินค้า</h2><p class="muted small">บอกว่ารูปนี้เป็นสินค้าชนิดไหน รุ่นอะไร · AI ใช้เทียบเวลาแยกรุ่นจากรูป</p><label class="field"><span class="lbl">สินค้า</span><select id="r-p">' +
-      list.map(p => '<option value="' + p.id + '"' + (guess && guess.id === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
+    // ผู้ใช้ 12 พ.ย. 2569: เพิ่มสินค้าชนิดใหม่ / รุ่นใหม่ได้ในหน้าต่างนี้เลย (ใช้ saveProduct เดิม ไม่ต้องไปหน้าสินค้า)
+    const NEW = '__new';
+    sheet('<h2>⭐ ใช้เป็นรูปตัวอย่างสินค้า</h2><p class="muted small">บอกว่ารูปนี้เป็นสินค้าชนิดไหน รุ่นอะไร · AI ใช้เทียบเวลาแยกรุ่นจากรูป · ไม่มีในรายการ = เลือก ➕ เพิ่มใหม่</p>' +
+      '<label class="field"><span class="lbl">ชนิดสินค้า</span><select id="r-p">' +
+      list.map(p => '<option value="' + p.id + '"' + (guess && guess.id === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') +
+      '<option value="' + NEW + '"' + (list.length ? '' : ' selected') + '>➕ เพิ่มสินค้าชนิดใหม่…</option></select></label>' +
+      '<label class="field" id="r-pn-w" hidden><span class="lbl">ชื่อสินค้าชนิดใหม่</span><input id="r-pn" maxlength="80" placeholder="เช่น รถขุด, รถตัดหญ้า"></label>' +
       '<label class="field"><span class="lbl">รุ่น</span><select id="r-m"></select></label>' +
+      '<label class="field" id="r-mn-w" hidden><span class="lbl">ชื่อรุ่นใหม่</span><input id="r-mn" maxlength="80" placeholder="เช่น T1.3L"></label>' +
       '<div class="actions"><button class="btn primary" id="r-ok">เพิ่มรูป</button><button class="btn" data-close>ยกเลิก</button></div>', el => {
-      const sel = el.querySelector('#r-p'), mod = el.querySelector('#r-m');
+      const sel = el.querySelector('#r-p'), mod = el.querySelector('#r-m'), pn = el.querySelector('#r-pn'), mn = el.querySelector('#r-mn');
+      const showNew = () => { el.querySelector('#r-pn-w').hidden = sel.value !== NEW; el.querySelector('#r-mn-w').hidden = mod.value !== NEW; };
       const fill = () => { const p = list.find(x => String(x.id) === sel.value); mod.innerHTML = '<option value="">(ไม่ระบุรุ่น)</option>' +
-        (p ? p.models.map(m => '<option' + (hint && m && hint.includes(String(m).toLowerCase()) ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : ''); };
-      sel.onchange = fill; fill();
+        (p ? p.models.map(m => '<option' + (hint && m && hint.includes(String(m).toLowerCase()) ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : '') +
+        '<option value="' + NEW + '">➕ เพิ่มรุ่นใหม่…</option>'; showNew(); };
+      sel.onchange = () => { fill(); if (sel.value === NEW) pn.focus(); };
+      mod.onchange = () => { showNew(); if (mod.value === NEW) mn.focus(); };
+      fill();
       el.querySelector('#r-ok').onclick = async e => {
+        const newP = sel.value === NEW, newM = mod.value === NEW;
+        const pName = newP ? pn.value.replace(/\s+/g, ' ').trim() : ((list.find(x => String(x.id) === sel.value) || {}).name || 'สินค้า');
+        const model = newM ? mn.value.replace(/\s+/g, ' ').trim().replace(/,/g, ' ') : mod.value;
+        if (newP && !pName) { pn.focus(); return toast('ใส่ชื่อสินค้าชนิดใหม่ก่อน'); }
+        if (newM && !model) { mn.focus(); return toast('ใส่ชื่อรุ่นใหม่ก่อน'); }
         busy(e.target);
-        try { await core('addProductImages', { id: Number(sel.value), model: mod.value, from }); state.products = null; closeSheet();
-          toast('เพิ่มเป็นรูปตัวอย่างของ ' + ((list.find(x => String(x.id) === sel.value) || {}).name || 'สินค้า') + (mod.value ? ' รุ่น ' + mod.value : '') + ' แล้ว ✅'); }
-        catch (err) { unbusy(); if (err.message !== 'login') toast('⚠️ ' + err.message); }
+        try {
+          let id = Number(sel.value);
+          if (newP) { // สินค้าชนิดใหม่ (+ รุ่นถ้ามี) · ชื่อซ้ำของเดิม = ใช้ของเดิม
+            const same = list.find(x => String(x.name).trim().toLowerCase() === pName.toLowerCase());
+            if (same) id = same.id;
+            else id = (await core('saveProduct', { name: pName, models: model ? [model] : [] })).product.id;
+          }
+          const p = list.find(x => x.id === id);
+          if (p && model && !p.models.some(m => String(m).toLowerCase() === model.toLowerCase())) // รุ่นใหม่ → เพิ่มเข้ารายการรุ่นของสินค้านั้น (เก็บช่องอื่นเดิม)
+          { const full = (await core('product', { id })).product; // อ่านข้อมูลเต็มล่าสุดก่อน กันคำเรียก/คำใบ้ SN/โน้ตหาย
+            if (!full.models.some(m => String(m).toLowerCase() === model.toLowerCase()))
+              await core('saveProduct', { id, name: full.name, models: full.models.concat(model), aliases: full.aliases, sn_hint: full.sn_hint, notes: full.notes }); }
+          await core('addProductImages', { id, model, from }); state.products = null; closeSheet();
+          toast('เพิ่มเป็นรูปตัวอย่างของ ' + pName + (model ? ' รุ่น ' + model : '') + ' แล้ว ✅' + (newP || newM ? ' (เพิ่ม' + (newP ? 'สินค้า' : '') + (newP && newM ? '/' : '') + (newM ? 'รุ่น' : '') + 'ใหม่ในรายการแล้ว)' : ''));
+        } catch (err) { state.products = null; unbusy(); if (err.message !== 'login') toast('⚠️ ' + err.message); }
       };
     });
   }
