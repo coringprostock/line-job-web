@@ -1680,13 +1680,14 @@
   function drawReview() {
     const data = state.review;
     if (!data.items.length) {
-      $app.innerHTML = reviewHeader() + '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ตัดสินครบทุกข้อแล้ว · ' +
+      $app.innerHTML = reviewHeader() + teachBar() + '<div class="center"><p>✅ ไม่มีข้อที่ต้องตรวจ</p><p class="muted small">ข้อเสนอของ AI ตัดสินครบทุกข้อแล้ว · ' +
         'ถ้าคิดว่า AI ข้ามงานไป ดูในโหมด “ไล่ตามแชท”</p></div>';
       bindReviewHeader();
+      bindTeachBar();
       drawBulkBar();
       return;
     }
-    let html = reviewHeader() + '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length +
+    let html = reviewHeader() + teachBar() + '<p class="muted small">ข้อเสนอของ AI ที่ยังไม่มีคนยืนยัน ' + data.items.length +
       ' ข้อ เรียงจากเก่าไปใหม่ · ติ๊กหลายข้อแล้วกดแถบด้านล่างได้</p>';
     REVIEW_GROUPS.forEach(([key, title, test]) => {
       const list = data.items.map((it, i) => [it, i]).filter(([it]) => test(it));
@@ -1699,6 +1700,7 @@
     });
     $app.innerHTML = html + '<div class="bulk-spacer"></div>';
     bindReviewHeader();
+    bindTeachBar();
     $app.querySelectorAll('[data-act]').forEach(btn => btn.onclick = () => {
       const it = data.items[Number(btn.dataset.i)];
       if (btn.dataset.act === 'notjob') { busy(btn); decide(it, { decision: 'notjob' }, 'บันทึกว่าไม่เกี่ยวแล้ว'); }
@@ -2063,6 +2065,64 @@
       setBadge(review.items.length);
       const y = window.scrollY; drawReview(); window.scrollTo(0, y);
     } catch (err) { /* เงียบ: กดแท็บคิวตรวจซ้ำเพื่อโหลดใหม่ได้ */ }
+  }
+
+  // ---------- สอน AI: ถามเหตุผลข้อที่คนตัดสินต่างจาก AI (ผู้ใช้ 16 พ.ย. 2569 · Worker src/learn.js) ----------
+  // ไม่บังคับ ไม่ขวางการตรวจ: แถบเหนือคิว → ถามทีละเรื่อง กดปุ่มเหตุผลสำเร็จรูปหรือพิมพ์เอง · ข้ามได้ (ไม่ถามซ้ำ)
+  const TEACH_CHIPS = {
+    new_to_old: ['ลูกค้า/เครื่องเดียวกับงานนี้', 'ชื่อบนบิลคือบริษัทของลูกค้างานนี้', 'คุยต่อจากเรื่องของงานนี้', 'เครื่องอยู่ศูนย์อยู่แล้ว'],
+    old_to_old: ['คนละเครื่อง/คนละคัน', 'ลูกค้าเดียวกันแต่เป็นอีกงาน', 'ดูจากรุ่น/SN', 'ดูจากคนที่คุยหรือ Reply'],
+    not_to_job: ['เป็นส่วนของงานนี้ (อะไหล่/จ่ายเงิน/ส่งของ)', 'คุยต่อจากเรื่องของงานนี้', 'เป็นเรื่องซ่อมของลูกค้า'],
+    to_not: ['ซื้อของ/ธุระภายใน', 'ขายสินค้า ไม่ใช่งานซ่อม', 'คุยทั่วไป', 'R&D/เตรียมของ ไม่ใช่เครื่องลูกค้า'],
+    to_new: ['ลูกค้าเดิมแต่เครื่องหรืออาการใหม่', 'คนละลูกค้า', 'งานเดิมปิดแล้ว เป็นซ่อมซ้ำ'],
+    unsure: ['ดูจากลูกค้า/เบอร์', 'ดูจากเครื่อง/รุ่น', 'ดูจากบทสนทนาก่อนหน้า']
+  };
+  const teachBar = () => state.review && state.review.teach ? '<button class="teach-bar" id="teach-open">🎓 AI อยากถามเหตุผล ' + state.review.teach +
+    ' ข้อ<span class="muted small"> · ช่วยสอนให้ครั้งหน้าเลือกถูก ›</span></button>' : '';
+  function bindTeachBar() { const b = document.getElementById('teach-open'); if (b) b.onclick = () => teachSheet(); }
+  async function teachSheet() {
+    sheet('<h2>🎓 สอน AI</h2><div class="center muted">กำลังโหลด…</div>');
+    let data;
+    try { data = await api('teachList'); } catch (err) { closeSheet(); toast(err.message); return; }
+    const done = msg => { closeSheet(); if (state.review) state.review.teach = 0; if (msg) toast(msg); if (location.hash === '#review' && state.reviewMode === 'queue') { const y = window.scrollY; drawReview(); window.scrollTo(0, y); } };
+    let saved = 0;
+    const show = (list, left) => {
+      if (!list.length) return done(saved ? 'ขอบคุณครับ บันทึกเหตุผล ' + saved + ' ข้อ AI จะใช้ตั้งแต่รอบถัดไป' : '');
+      const q = list[0], chips = TEACH_CHIPS[q.kind] || TEACH_CHIPS.unsure;
+      sheet('<h2>🎓 สอน AI <span class="muted small">เหลือ ' + left + ' ข้อ</span></h2>' +
+        '<div class="teach-msg"><div class="muted small">' + esc(q.sender) + ' · ' + esc(fmtDateTime(q.time)) + (q.n > 1 ? ' · ' + q.n + ' ก้อน' : '') + '</div>' + esc(q.text).replace(/\n/g, '<br>') + '</div>' +
+        '<div class="teach-row"><b>🤖 AI ตอบ</b> ' + esc(q.ai) + (q.aiReason ? '<div class="muted small">เพราะ: ' + esc(q.aiReason) + '</div>' : '') + '</div>' +
+        '<div class="teach-row you"><b>👤 คุณตัดสิน</b> ' + esc(q.human) + '</div>' +
+        '<p><b>ทำไมถึงเป็นแบบนี้?</b> <span class="muted small">กดเลือกหรือพิมพ์เอง สั้นๆ ก็ได้</span></p>' +
+        '<div class="teach-chips">' + chips.map(c => '<button class="chip" data-chip>' + esc(c) + '</button>').join('') + '</div>' +
+        '<textarea id="teach-why" rows="2" maxlength="300" placeholder="เช่น ชื่อบนบิลเป็นบริษัทของลูกค้างานนี้"></textarea>' +
+        '<div class="actions"><button class="btn primary" id="teach-save">บันทึกเหตุผล</button><button class="btn" id="teach-skip">ข้ามข้อนี้</button><button class="btn" data-close>ไว้ทีหลัง</button></div>', el => {
+        const box = el.querySelector('#teach-why');
+        el.querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
+          b.classList.toggle('on');
+          const t = b.textContent, cur = box.value.split(' · ').map(x => x.trim()).filter(Boolean);
+          box.value = (b.classList.contains('on') ? cur.concat(cur.indexOf(t) < 0 ? [t] : []) : cur.filter(x => x !== t)).join(' · ');
+        });
+        const send = async (btn, body) => {
+          busy(btn);
+          try {
+            const out = await api('teach', Object.assign({ rows: q.rows }, body));
+            if (!body.skip) saved++;
+            if (state.review) state.review.teach = out.remaining;
+            show(list.slice(1), out.remaining);
+          } catch (err) { unbusy(); toast(err.message); }
+        };
+        el.querySelector('#teach-save').onclick = e => {
+          const reason = box.value.trim();   // อ่านค่าก่อนเปลี่ยนหน้าต่างเสมอ
+          if (!reason) { toast('เลือกหรือพิมพ์เหตุผลก่อน หรือกดข้ามข้อนี้'); return; }
+          send(e.currentTarget, { reason });
+        };
+        el.querySelector('#teach-skip').onclick = e => send(e.currentTarget, { skip: true });
+      });
+    };
+    if (state.review) state.review.teach = data.count;
+    if (!data.items.length) return done('ไม่มีข้อที่ AI อยากถามแล้ว');
+    show(data.items, data.count);
   }
 
   // ---------- สถิติ ----------

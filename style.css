@@ -544,3 +544,13 @@ ul.plain li:first-child { border-top: 0; }
 .cl-text { grid-column: 1 / -1; white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
 .cluster .rv { margin: 6px 0; }
 .cluster .actions { margin: 10px 0 0; }
+
+/* สอน AI (v69): แถบเหนือคิวตรวจ + หน้าต่างถามเหตุผล */
+.teach-bar { display: block; width: 100%; text-align: left; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #7c3aed; border-radius: 10px;
+  background: rgba(124, 58, 237, .08); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+.teach-msg { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; max-height: 30vh; overflow: auto; font-size: 14px; overflow-wrap: anywhere; }
+.teach-row { padding: 6px 10px; border-left: 3px solid var(--line); margin-bottom: 6px; font-size: 14px; }
+.teach-row.you { border-left-color: #16a34a; }
+.teach-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.teach-chips .chip { white-space: normal; text-align: left; font: inherit; font-size: 13px; color: var(--text); }
+#teach-why { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; }
