@@ -3272,18 +3272,35 @@
   });
   if (document.fonts) document.fonts.ready.then(fitTopbar);
 
-  // API key ใกล้หมดอายุ (Worker ส่งมาเฉพาะเจ้าของระบบ · keys.js) → ป้ายแดงบนสุดทุกหน้า กดปิดได้วันละครั้ง
+  // API key ใกล้หมดอายุ (Worker ส่งมาเฉพาะเจ้าของระบบ · keys.js) → ป้ายแดงบนสุดทุกหน้า
+  // ทีละคีย์: "✅ ทำแล้ว" = ไม่เตือนคีย์นี้อีก (ทั้งป้ายและแชท จนกว่าวันหมดอายุใหม่) · "⏰ ยังไม่ทำ" = ซ่อนถึงพรุ่งนี้ (ผู้ใช้ 20 พ.ย. 2569)
   function drawKeyAlerts(list) {
     let seen = '';
     try { seen = localStorage.getItem('keyAlertSeen') || ''; } catch { /* โหมดส่วนตัว */ }
     const today = new Date().toISOString().slice(0, 10);
-    if (!list.length || seen === today || document.getElementById('key-alert')) return;
+    const old = document.getElementById('key-alert');
+    if (old) old.remove();
+    if (!list.length || seen === today) return;
     const el = document.createElement('div');
     el.id = 'key-alert';
     el.className = 'key-alert';
-    el.innerHTML = list.map(k => '🔑 <b>' + esc(k.name) + '</b> (' + esc(k.where) + ') ' + (k.days < 0 ? 'หมดอายุแล้ว' : k.days === 0 ? 'หมดอายุวันนี้' : 'หมดอายุอีก ' + k.days + ' วัน') +
-      (k.how ? '<div class="small">' + esc(k.how) + '</div>' : '')).join('<hr>') + '<button type="button" aria-label="ปิด">✕</button>';
-    el.querySelector('button').onclick = () => { try { localStorage.setItem('keyAlertSeen', today); } catch { /* ไม่เป็นไร */ } el.remove(); };
+    el.innerHTML = list.map((k, i) => '<div>🔑 <b>' + esc(k.name) + '</b> (' + esc(k.where) + ') ' + (k.days < 0 ? 'หมดอายุแล้ว' : k.days === 0 ? 'หมดอายุวันนี้' : 'หมดอายุอีก ' + k.days + ' วัน') +
+      (k.how ? '<div class="small">' + esc(k.how) + '</div>' : '') +
+      '<div class="key-acts"><button type="button" data-done="' + i + '">✅ ทำแล้ว</button><button type="button" data-later>⏰ ยังไม่ทำ</button></div></div>').join('<hr>');
+    el.querySelectorAll('[data-later]').forEach(b => { b.onclick = () => { try { localStorage.setItem('keyAlertSeen', today); } catch { /* ไม่เป็นไร */ } el.remove(); toast('ซ่อนไว้ พรุ่งนี้เตือนใหม่'); }; });
+    el.querySelectorAll('[data-done]').forEach(b => {
+      b.onclick = async () => {
+        const k = list[Number(b.dataset.done)];
+        if (!confirm('ยืนยัน "' + k.name + '" จัดการแล้ว (ต่ออายุแล้ว หรือไม่ใช้ต่อ)?\nจะไม่เตือนคีย์นี้อีก ทั้งป้ายนี้และแชทน้องจ๊อบ')) return;
+        b.disabled = true;
+        try {
+          const r = await core('ackKey', { name: k.name, expires: k.expires });
+          if (r.error) throw new Error(r.error);
+          drawKeyAlerts(r.keyAlerts || []);
+          toast('บันทึกแล้ว ไม่เตือน ' + k.name + ' อีก ✅');
+        } catch (e) { b.disabled = false; toast('บันทึกไม่สำเร็จ: ' + e.message); }
+      };
+    });
     $app.parentNode.insertBefore(el, $app);
   }
 

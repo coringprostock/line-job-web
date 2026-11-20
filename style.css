@@ -482,9 +482,11 @@ label.btn { display: inline-flex; align-items: center; justify-content: center; 
 #psubmit:not(.ready) { opacity: .6; }
 
 /* ป้ายเตือนต่ออายุ API key (เฉพาะเจ้าของระบบ) */
-.key-alert { position: relative; margin: 8px 16px 0; padding: 10px 36px 10px 12px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 14px; }
+.key-alert { position: relative; margin: 8px 16px 0; padding: 10px 12px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 14px; }
 .key-alert hr { border: 0; border-top: 1px solid rgba(255, 255, 255, .4); margin: 6px 0; }
-.key-alert button { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: #fff; font-size: 18px; cursor: pointer; }
+.key-acts { display: flex; gap: 8px; margin-top: 8px; }
+.key-acts button { flex: 1; padding: 8px; border: 1px solid rgba(255, 255, 255, .7); border-radius: 8px; background: rgba(255, 255, 255, .15); color: #fff; font-size: 14px; cursor: pointer; }
+.key-acts button[data-done] { background: #fff; color: var(--danger); font-weight: 600; }
 
 /* ---------- สรุปการซ่อม (v50) ---------- */
 .repair-box { margin: 10px 0; }
