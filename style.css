@@ -556,3 +556,10 @@ ul.plain li:first-child { border-top: 0; }
 .teach-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .teach-chips .chip { white-space: normal; text-align: left; font: inherit; font-size: 13px; color: var(--text); }
 #teach-why { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; }
+
+/* รุ่นมาตรฐาน (bindPick) */
+.pick { margin-top: 6px; }
+.pick-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.pick-row select { flex: 1 1 140px; min-width: 0; }
+.pick-note { margin-top: 2px; }
+.pick-warn { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: #fff3cd; color: #8a5a00; font-size: 12px; }

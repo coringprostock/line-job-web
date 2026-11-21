@@ -1163,14 +1163,17 @@
     const fld = (label, inner) => '<label class="field"><span class="lbl">' + label + '</span>' + inner + '</label>';
     sheet('<h2>📋 ตรวจสรุปการซ่อม ' + esc(data.job.no) + '</h2><p class="muted small">AI สรุปให้แล้ว แก้ช่องที่ไม่ถูกได้เลย แล้วกดยืนยัน</p>' +
       fld('สรุปสั้น', area('summary', 2)) +
-      fld('สินค้า/รุ่น', '<input data-rk="product" value="' + esc(r.product) + '">') + fld('SN', '<input data-rk="serial" value="' + esc(r.serial) + '">') +
+      fld('สินค้า/รุ่น', '<input data-rk="product" value="' + esc(r.product) + '">' + pickHtml('r-pick')) + fld('SN', '<input data-rk="serial" value="' + esc(r.serial) + '">') +
       REPAIR_ROWS.map(([k, label]) => fld(label, k === 'system' ? sel(k, opts.systems) : k === 'cause_type' ? sel(k, opts.causes) : area(k, ['cause', 'fix', 'prevent'].includes(k) ? 3 : 2))).join('') +
       '<div class="actions"><button class="btn primary" id="r-ok">✅ ยืนยันสรุป</button><button class="btn" id="r-more">🗣️ เล่าเพิ่ม ให้ AI สรุปใหม่</button>' +
       '<button class="btn" data-close>ไว้ทีหลัง</button></div>', el => {
       el.querySelector('#r-more').onclick = () => repairTell(data, '');
+      const pick = bindPick(el.querySelector('#r-pick'), r, el.querySelector('[data-rk="product"]'));
       el.querySelector('#r-ok').onclick = async e => {
         const report = {};
         el.querySelectorAll('[data-rk]').forEach(x => { report[x.dataset.rk] = x.value.trim(); });
+        const pv = (await pick).value();
+        if (pv) Object.assign(report, { productId: pv.productId, productModel: pv.productModel });
         if (!report.part && !report.fix) return toast('ใส่ชิ้นส่วนที่เสีย หรือวิธีแก้ อย่างน้อย 1 ช่อง');
         busy(e.target);
         try {
@@ -1197,7 +1200,9 @@
     let h = '<div class="panel-box info-box"><div class="row"><b>ข้อมูลงาน</b><button class="btn" id="info-edit">✏️ แก้ข้อมูลงาน</button></div>';
     INFO_ROWS.forEach(([k, label]) => {
       const v = k === 'phone' && i.phone ? fmtPhoneTh(i.phone) : i[k];
-      h += '<div class="info-row"><span class="muted">' + label + '</span><span' + (v ? '' : ' class="muted"') + '>' + esc(v || '—') + '</span></div>';
+      const tag = k === 'product' && v && i.productId === null ? ' <span class="pick-warn">ยังไม่รู้รุ่น · กดแก้ข้อมูลแล้วเลือก</span>'
+        : k === 'product' && i.productId === -1 ? ' <span class="muted small">(ยี่ห้ออื่น)</span>' : '';   // รุ่นมาตรฐาน (bindPick)
+      h += '<div class="info-row"><span class="muted">' + label + '</span><span' + (v ? '' : ' class="muted"') + '>' + esc(v || '—') + tag + '</span></div>';
     });
     const files = data.files || [];
     h += '<div class="info-row"><span class="muted">รูป/คลิป</span><span>' + i.photos + ' ไฟล์</span></div>';
@@ -1242,7 +1247,7 @@
       fld('phone', 'เบอร์ลูกค้า', '<input id="i-phone" type="tel" inputmode="tel" value="' + esc(i.phone || '') + '">') +
       fld('symptom', 'อาการ / สิ่งที่ลูกค้าแจ้ง', '<textarea id="i-symptom" rows="3" maxlength="300">' + esc(i.symptom || '') + '</textarea>') +
       fld('product', 'สินค้า / รุ่น', '<input id="i-product" list="plist2" maxlength="80" value="' + esc(i.product || '') + '"><datalist id="plist2">' +
-        PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist>') +
+        PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist>' + pickHtml('i-pick')) +
       fld('serial', 'SN / เลขเครื่อง (ป้ายชำรุดพิมพ์ "ป้ายชำรุด")', '<input id="i-serial" maxlength="40" value="' + esc(i.serial || '') + '">') +
       fld('address', 'ที่อยู่', '<textarea id="i-address" rows="2" maxlength="200">' + esc(i.address || '') + '</textarea>') +
       fld('province', 'จังหวัด', '<select id="i-province">' + opt(PROVINCES, i.province) + '</select>') +
@@ -1259,9 +1264,12 @@
       });
       const first = el.querySelector('.field.need:not(.ok)');
       if (first) first.scrollIntoView({ block: 'center' });
+      const pick = bindPick(el.querySelector('#i-pick'), i, el.querySelector('#i-product'));
       el.querySelector('#f-ok').onclick = async e => {
         const info = {};
         INFO_ROWS.forEach(([k]) => { info[k] = el.querySelector('#i-' + k).value.trim(); });
+        const pv = (await pick).value();
+        if (pv) Object.assign(info, { productId: pv.productId, productModel: pv.productModel });
         if (info.phone && info.phone.replace(/\D/g, '').length < 9) return toast(CORE_ERRORS.bad_phone);
         busy(e.target);
         try {
@@ -2282,6 +2290,54 @@
     'มุกดาหาร', 'แม่ฮ่องสอน', 'ยโสธร', 'ยะลา', 'ร้อยเอ็ด', 'ระนอง', 'ระยอง', 'ราชบุรี', 'ลพบุรี', 'ลำปาง', 'ลำพูน', 'เลย', 'ศรีสะเกษ',
     'สกลนคร', 'สงขลา', 'สตูล', 'สมุทรปราการ', 'สมุทรสงคราม', 'สมุทรสาคร', 'สระแก้ว', 'สระบุรี', 'สิงห์บุรี', 'สุโขทัย', 'สุพรรณบุรี',
     'สุราษฎร์ธานี', 'สุรินทร์', 'หนองคาย', 'หนองบัวลำภู', 'อ่างทอง', 'อำนาจเจริญ', 'อุดรธานี', 'อุตรดิตถ์', 'อุทัยธานี', 'อุบลราชธานี'];
+  // ---------- รุ่นมาตรฐาน (ฐานความรู้ระยะ A1 · ผู้ใช้ 20 พ.ย. 2569) ----------
+  // เลือก "ชนิดสินค้า → รุ่น" จากหน้าสินค้า ให้นับสถิติ/วิเคราะห์ต่อรุ่นได้ · ไม่เลือก = Worker จับคู่จากชื่อที่พิมพ์เอง (productmatch.js)
+  let catalogP = null;
+  function catalogList() {
+    if (state.products) return Promise.resolve(state.products.products);
+    return catalogP || (catalogP = core('products').then(d => { state.products = d; catalogP = null; return d.products; }, e => { catalogP = null; throw e; }));
+  }
+  const pickHtml = id => '<div class="pick" id="' + id + '"><div class="pick-row"><select class="pick-p"><option value="">⏳ กำลังโหลดรายการสินค้า…</option></select>' +
+    '<select class="pick-m" hidden></select></div><div class="muted small pick-note"></div></div>';
+  const pickName = p => p.name.replace(/\s*\([^)]*\)/g, '').trim();
+  /** cur = { productId, productModel, product } · textInput = ช่องชื่อสินค้า (เลือกแล้วเติมชื่อให้) · onPick(v) ทุกครั้งที่เลือก
+   *  คืน { value() } → { productId, productModel } เมื่อคนเลือกเอง · ไม่ได้แตะ = null (ให้ Worker จับคู่เอง) */
+  async function bindPick(box, cur, textInput, onPick) {
+    const ps = box.querySelector('.pick-p'), ms = box.querySelector('.pick-m'), note = box.querySelector('.pick-note');
+    let list;
+    try { list = await catalogList(); } catch { ps.innerHTML = '<option value="">โหลดรายการสินค้าไม่ได้ (บันทึกได้ตามปกติ)</option>'; return { value: () => null }; }
+    cur = cur || {};
+    const has = cur.productId !== null && cur.productId !== undefined && cur.productId !== '';
+    const sel = id => has && String(cur.productId) === String(id) ? ' selected' : '';
+    ps.innerHTML = '<option value="">— เลือกชนิดสินค้า —</option>' + list.map(p => '<option value="' + p.id + '"' + sel(p.id) + '>' + esc(p.name) + '</option>').join('') +
+      '<option value="-1"' + sel(-1) + '>ไม่ใช่สินค้าบริษัท / ยี่ห้ออื่น</option>';
+    const models = model => {
+      const p = list.find(x => String(x.id) === ps.value);
+      ms.hidden = !p || !p.models.length;
+      ms.innerHTML = '<option value="">ไม่ทราบรุ่น</option>' + (p ? p.models.map(m => '<option value="' + esc(m) + '"' + (m === model ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : '');
+    };
+    models(cur.productModel);
+    note.textContent = has ? (cur.pickedNow ? '' : 'ระบบจับคู่รุ่นไว้แล้ว ถ้าไม่ถูกเลือกใหม่ได้') : (cur.product ? '⚠️ ระบบยังไม่รู้ว่าเป็นรุ่นไหน ช่วยเลือกให้หน่อย (ใช้นับสถิติต่อรุ่น)' : 'เลือกเพื่อให้นับสถิติต่อรุ่นได้ถูก');
+    let touched = !!cur.pickedNow;
+    const changed = () => {
+      touched = true; note.textContent = '';
+      const p = list.find(x => String(x.id) === ps.value);
+      if (p && textInput) textInput.value = (pickName(p) + (ms.value ? ' ' + ms.value.replace(/\s*\([^)]*\)/g, '') : '')).trim();
+      if (onPick) onPick(value());
+    };
+    const value = () => touched && ps.value !== '' ? { productId: Number(ps.value), productModel: ms.value, pickedNow: true } : null;
+    ps.onchange = e => { e.stopPropagation(); models(''); changed(); };
+    ms.onchange = e => { e.stopPropagation(); changed(); };
+    // พิมพ์ชื่อสินค้าเองทีหลัง = ล้างที่เลือก (ให้ Worker จับคู่จากชื่อที่พิมพ์)
+    if (textInput) textInput.addEventListener('input', () => {
+      if (!touched && !has) return;
+      touched = false; ps.querySelectorAll('option').forEach((o, i) => o.toggleAttribute('selected', !i)); ps.selectedIndex = 0; models('');
+      note.textContent = 'พิมพ์ชื่อเอง ระบบจะจับคู่รุ่นให้ตอนบันทึก (หรือเลือกจากรายการ)';
+      if (onPick) onPick(null);
+    });
+    return { value };
+  }
+
   const PRODUCT_HINTS = ['รถขุด TREX T1', 'รถขุด T1.2', 'รถขุด T1.3', 'รถขุด T1.4L', 'รถขุด T1.5K', 'รถขุด T1.6 แทรคเหล็ก', 'รถบด RL600',
     'รถบดนั่งขับ 1.2 ตัน', 'เครื่องตบดิน', 'รถดั๊มพ์ตีนตะขาบ', 'เครื่องตัดคอนกรีต T800B', 'เครื่องตัดคอนกรีต Turbo Max T-600D',
     'เครื่องดัดเหล็ก นิวตัน 25', 'เครื่องดัดเหล็ก นิวตัน 32', 'เครื่องดัดเหล็ก B16', 'เครื่องตัดเหล็ก C32', 'เครื่องเจาะคอริ่ง (ดำ 3800W)',
@@ -2434,7 +2490,7 @@
         '<select name="plateState">' + [['', 'ป้ายอ่านได้ครบ'], ['damaged', 'ป้ายชำรุด / เลขเลือน ขาดบางตัว'], ['none', 'เครื่องไม่มีป้าย / ป้ายหาย']]
           .map(o => '<option value="' + o[0] + '"' + (o[0] === (v.plateState || '') ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
         '<label class="field"><span class="lbl">สินค้า / รุ่น</span><input name="product" list="plist" value="' + esc(v.product || '') + '"><datalist id="plist">' +
-          PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>') +
+          PRODUCT_HINTS.map(p => '<option value="' + esc(p) + '">').join('') + '</datalist></label>' + pickHtml('n-pick')) +
       step(3, '👤 ลูกค้า', true, '<p class="muted small">ใส่ชื่อ หรือเบอร์ อย่างน้อยหนึ่งอย่าง</p>' +
         '<label class="field"><span class="lbl">ชื่อลูกค้า / ร้าน</span><div class="search-row"><input name="customer" value="' + esc(v.customer || '') + '">' + mic('customer') + '</div></label>' +
         '<label class="field"><span class="lbl">เบอร์ลูกค้า</span><input name="phone" type="tel" inputmode="tel" value="' + esc(v.phone || '') + '"></label><div id="dup"></div>') +
@@ -2454,6 +2510,9 @@
       intake.atShop = form.atShop.checked; intake.sendCard = form.sendCard.checked; intake.plateState = form.plateState.value; };
     form.oninput = () => { keep(); drawSteps(); };
     form.onchange = () => { keep(); drawSteps(); };
+    // รุ่นมาตรฐาน: เลือกแล้วจำไว้ใน intake.pick (กลับมาหน้านี้ยังอยู่) · พิมพ์ชื่อสินค้าใหม่เอง = bindPick ล้างให้ (onPick null)
+    const prodIn = form.querySelector('[name="product"]');
+    bindPick(document.getElementById('n-pick'), intake.pick || {}, prodIn, v => { intake.pick = v; keep(); drawSteps(); });
     form.plateState.onchange = () => { keep(); drawPlateState(); drawSteps(); };
     form.querySelectorAll('[data-mic]').forEach(b => b.onclick = () => listen(b, form[b.dataset.mic]));
     drawPlateState();
@@ -2616,6 +2675,7 @@
     try {
       const fd = new FormData(form);
       const job = { symptom: fd.get('symptom'), phone: fd.get('phone'), customer: fd.get('customer'), product: fd.get('product'), serial,
+        productId: intake.pick ? intake.pick.productId : undefined, productModel: intake.pick ? intake.pick.productModel : undefined,
         address: fd.get('address'), province: fd.get('province'), mapUrl: fd.get('mapUrl'), lat: intake.lat, lng: intake.lng,
         atShop: form.atShop.checked, sendCard: form.sendCard.checked, attachTo: intake.attachTo, files: intake.files.filter(f => f.key).map(f => f.key) };
       const out = await core('createJob', { job });
